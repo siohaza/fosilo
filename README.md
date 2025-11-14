@@ -1,6 +1,6 @@
 # Fosilo
 
-An Ace of Spades v0.75 dedicated server written in Go.
+An Ace of Spades 0.75 dedicated server written in Go.
 
 ## Features
 
