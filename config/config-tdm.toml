@@ -1,0 +1,95 @@
+[server]
+# The server's name shown on the master server list and in the game
+name = "Fosilo TDM Server"
+
+# Port for the server to listen on
+port = 32887
+
+# Team Deathmatch
+gamemode = 3
+
+# Maximum players allowed
+max_players = 32
+
+# Respawn time in seconds
+respawn_time = 3
+
+# Enable master server listing
+# Set to true to appear on server lists
+master = false
+
+# You can specify masterserver hosts if one of them dies
+# [[server.master_hosts]]
+# host = "master.buildandshoot.com"
+# port = 32886
+
+# Map rotation
+maps = [
+    "classicgen"
+]
+
+# Welcome messages sent when players join
+welcome_messages = [
+    "Welcome to experimental classicgen Fosilo TDM server",
+    "First team to 100 kills wins!",
+    "Type /help to see available commands"
+]
+
+# Periodic announcements broadcasted to all players
+periodic_messages = [
+    "This server is powered by Fosilo"
+]
+
+
+# Team configuration
+[teams]
+team1 = { name = "Alpha", color = [0, 0, 255] }
+team2 = { name = "Bravo", color = [255, 0, 0] }
+
+
+# Permission role passwords
+# Players use /login <role> <password> to gain permissions
+# IMPORTANT: Change these defaults for security!
+[passwords]
+manager   = "changeme1"    # Full control
+admin     = "changeme2"    # Can kick, ban, manage
+moderator = "changeme3"    # Can kick, mute
+guard     = "changeme4"    # Can mute, warn
+trusted   = "changeme5"    # Trusted status
+
+
+# Voting system
+[voting]
+votekick_enabled = true
+votekick_percentage = 40        # Slightly higher threshold for TDM (40% yes votes required)
+votekick_ban_duration = 30      # 30 minute temporary ban
+vote_cooldown = 120             # 2 minute cooldown between votes
+vote_timeout = 120              # Vote expires after 2 minutes
+
+votemap_enabled = false
+votemap_percentage = 75         # 75% yes votes required
+votemap_choices = 5             # Offer 5 random maps
+votemap_allow_extend = true     # Allow extending current map
+
+
+# TDM Gamemode Settings
+[gamemode.tdm]
+# Number of kills needed to win the match
+kill_limit = 100
+
+# Points awarded for capturing intel (if enabled)
+intel_points = 10
+
+# Remove intel entirely for pure deathmatch
+# Set to true for maps without objectives, just kills
+remove_intel = true
+
+# Headshot score multiplier
+# Awards extra points for headshot kills (kill_type == 1)
+# Set to 2.0 for double points on headshots
+headshot_multiplier = 2.0
+
+# Enable kill streak bonuses and announcements
+# Announcements at 5, 10, 15, 20+ kills
+# Bonus points at 10 (+2), 15 (+3), 20+ (+5)
+enable_killstreaks = true

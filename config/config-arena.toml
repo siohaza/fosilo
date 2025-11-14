@@ -1,0 +1,97 @@
+[server]
+# The server's name shown on the master server list and in the game
+name = "Fosilo Arena Server"
+
+# Port for the server to listen on
+port = 32887
+
+# Arena
+gamemode = 4
+
+# Maximum players allowed (smaller for intense rounds)
+max_players = 16
+
+# Respawn time (not used during rounds, only between rounds)
+respawn_time = 5
+
+# Enable master server listing
+# Set to true to appear on server lists
+master = false
+
+# You can specify masterserver hosts if one of them dies
+# [[server.master_hosts]]
+# host = "master.buildandshoot.com"
+# port = 32886
+
+# Map rotation
+maps = [
+    "classicgen"
+]
+
+# Welcome messages sent when players join
+welcome_messages = [
+    "Welcome to Fosilo Arena Server!",
+    "Round-based elimination mode there are no respawns during rounds",
+    "Stay alive and eliminate the enemy team",
+    "First team to win 5 rounds wins the match!",
+    "Type /help to see available commands"
+]
+
+# Periodic announcements broadcasted to all players
+periodic_messages = [
+    "This server is powered by Fosilo",
+    "Every life counts - make them all count!",
+    "Communicate with your team for victory"
+]
+
+
+# Team configuration
+[teams]
+team1 = { name = "Blue", color = [0, 0, 255] }
+team2 = { name = "Red", color = [255, 0, 0] }
+
+
+# Permission role passwords
+# Players use /login <role> <password> to gain permissions
+# IMPORTANT: Change these defaults for security!
+[passwords]
+manager   = "changeme1"    # Full control
+admin     = "changeme2"    # Can kick, ban, manage
+moderator = "changeme3"    # Can kick, mute
+guard     = "changeme4"    # Can mute, warn
+trusted   = "changeme5"    # Trusted status
+
+
+# Voting system
+[voting]
+votekick_enabled = true
+votekick_percentage = 50        # Higher threshold for competitive arena (50% yes votes required)
+votekick_ban_duration = 30      # 30 minute temporary ban
+vote_cooldown = 180             # Longer cooldown (3 minutes)
+vote_timeout = 120              # Vote expires after 2 minutes
+
+votemap_enabled = true
+votemap_percentage = 75         # 75% yes votes required
+votemap_choices = 3             # Fewer choices for faster voting (offer 3 random maps)
+votemap_allow_extend = false    # No extending in arena
+
+
+# Arena Gamemode Settings
+[gamemode.arena]
+# Number of rounds needed to win the match
+score_limit = 5
+
+# Maximum time per round in seconds
+max_round_time = 180
+
+# Spawn protection/preparation time at start of each round
+# Players must stay in spawn zones during this time
+spawn_zone_time = 15
+
+# If true, round timeouts result in a draw instead of winner by most alive
+# Default is false (winner determined by player count)
+timeout_is_draw = false
+
+# Enable sudden death when teams are tied at match point (e.g., 4-4 in best of 5)
+# Next round winner takes the entire match
+sudden_death_enabled = true

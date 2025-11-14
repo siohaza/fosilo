@@ -1,0 +1,90 @@
+[server]
+# The server's name shown on the master server list and in the game
+name = "Fosilo TC Server"
+
+# Port for the server to listen on
+port = 32887
+
+# Territory Control
+gamemode = 1
+
+# Maximum players allowed
+max_players = 32
+
+# Respawn time in seconds
+respawn_time = 5
+
+# Enable master server listing
+# Set to true to appear on server lists
+master = false
+
+# You can specify masterserver hosts if one of them dies
+# [[server.master_hosts]]
+# host = "master.buildandshoot.com"
+# port = 32886
+
+# Map rotation
+maps = [
+    "classicgen",
+]
+
+# Welcome messages sent when players join
+welcome_messages = [
+    "Welcome to Fosilo Territory Control Server!",
+    "Capture and hold control points to score",
+    "Stand near control points to capture them",
+    "First team to 10 points wins!",
+    "Type /help to see available commands"
+]
+
+# Periodic announcements broadcasted to all players
+periodic_messages = [
+    "This server is powered by Fosilo",
+    "Those who control the points, controls the game!",
+    "Defend your captured points from enemies"
+]
+
+
+# Team configuration
+[teams]
+team1 = { name = "Blue", color = [0, 0, 255] }
+team2 = { name = "Green", color = [0, 255, 0] }
+
+
+# Permission role passwords
+# Players use /login <role> <password> to gain permissions
+# IMPORTANT: Change these defaults for security!
+[passwords]
+manager   = "changeme1"    # Full control
+admin     = "changeme2"    # Can kick, ban, manage
+moderator = "changeme3"    # Can kick, mute
+guard     = "changeme4"    # Can mute, warn
+trusted   = "changeme5"    # Trusted status
+
+
+# Voting system
+[voting]
+votekick_enabled = true
+votekick_percentage = 35        # 35% yes votes required
+votekick_ban_duration = 30      # 30 minute temporary ban
+vote_cooldown = 120             # 2 minute cooldown between votes
+vote_timeout = 120              # Vote expires after 2 minutes
+
+votemap_enabled = true
+votemap_percentage = 80         # 80% yes votes required
+votemap_choices = 5             # Offer 5 random maps
+votemap_allow_extend = true     # Allow extending current map
+
+
+# Territory Control Gamemode Settings
+[gamemode.tc]
+# Maximum score to win the match
+max_score = 10
+
+# Distance from capture point required to start capturing
+capture_distance = 16
+
+# Capture rate per tick (60 ticks per second)
+# 0.05 = takes about 20 seconds to fully capture
+capture_rate = 0.05
+
