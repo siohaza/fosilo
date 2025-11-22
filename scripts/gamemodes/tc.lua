@@ -62,7 +62,7 @@ function on_player_kill(killer, victim, kill_type)
 end
 
 function on_player_update(player)
-	local current_time = get_game_time()
+	local current_time = get_server_time()
 
 	if current_time - last_score_time >= score_interval then
 		award_territory_points()
