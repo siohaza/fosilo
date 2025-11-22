@@ -76,7 +76,7 @@ end
 
 function on_player_update(player)
 	if regenerate_tower and #tower_blocks > 0 then
-		local current_time = get_game_time()
+		local current_time = get_server_time()
 		if current_time - regeneration_timer >= regeneration_rate then
 			regenerate_destroyed_blocks()
 			regeneration_timer = current_time
