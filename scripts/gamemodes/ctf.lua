@@ -45,7 +45,7 @@ function on_player_kill(killer, victim, kill_type)
 end
 
 function on_player_update(player)
-	local current_time = get_game_time()
+	local current_time = get_server_time()
 
 	for team = 0, 1 do
 		if intel_drop_times[team] > 0 and intel_carriers[team] == nil then
@@ -69,13 +69,13 @@ end
 function on_intel_pickup(player_id, team)
 	intel_carriers[team] = player_id
 	intel_drop_times[team] = 0
-	intel_pickup_times[team] = get_game_time()
+	intel_pickup_times[team] = get_server_time()
 	return true
 end
 
 function on_intel_drop(player_id, team)
 	intel_carriers[team] = nil
-	intel_drop_times[team] = get_game_time()
+	intel_drop_times[team] = get_server_time()
 	intel_pickup_times[team] = 0
 	return true
 end
@@ -85,7 +85,7 @@ function on_intel_capture(player_id, team)
 	local points_to_add = 1
 
 	if capture_time_bonus > 0 and intel_pickup_times[team] > 0 then
-		local current_time = get_game_time()
+		local current_time = get_server_time()
 		local capture_time = current_time - intel_pickup_times[team]
 
 		if capture_time > 0 and capture_time <= capture_time_bonus then
