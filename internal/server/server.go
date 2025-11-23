@@ -822,8 +822,9 @@ func (s *Server) handleDisconnect(peer enet.Peer) {
 
 	if hasIntel {
 		pos := p.GetPosition()
-		s.gameState.DropIntel(1-team, pos)
-		s.broadcastIntelDrop(1-team, pos)
+		groundPos := s.getGroundIntelDropPosition(pos)
+		s.gameState.DropIntel(1-team, groundPos)
+		s.broadcastIntelDrop(1-team, groundPos)
 	}
 
 	s.broadcastPlayerLeft(p.ID)
@@ -1010,7 +1011,11 @@ func (s *Server) handlePositionData(p *player.Player, data []byte) {
 		return
 	}
 
-	p.SetPosition(protocol.Vector3f{X: packet.X, Y: packet.Y, Z: packet.Z})
+	p.Lock()
+	p.Position = protocol.Vector3f{X: packet.X, Y: packet.Y, Z: packet.Z}
+	p.EyePos = protocol.Vector3f{X: packet.X, Y: packet.Y, Z: packet.Z}
+	p.Velocity = protocol.Vector3f{X: 0, Y: 0, Z: 0}
+	p.Unlock()
 }
 
 func (s *Server) handleOrientationData(p *player.Player, data []byte) {
@@ -1499,6 +1504,11 @@ func (s *Server) handleExistingPlayer(p *player.Player, data []byte) {
 		name = "Unknown"
 	}
 
+	name = strings.TrimSpace(name)
+	if name == "" {
+		name = "Deuce"
+	}
+
 	_ = playerID
 	_ = kills
 
@@ -1746,6 +1756,12 @@ func (s *Server) handleChatMessage(p *player.Player, data []byte) {
 
 	trimmed := bytes.TrimRight(packet.Message, "\x00")
 	message := string(trimmed)
+	message = strings.TrimSpace(message)
+
+	if message == "" {
+		return
+	}
+
 	s.logger.Info("chat message", "player", p.GetName(), "message", message)
 
 	if p.Muted {
@@ -2215,8 +2231,9 @@ func (s *Server) damagePlayer(playerID uint8, damage uint8, source protocol.Vect
 		if p.HasIntel && p.Team <= 1 {
 			oppositeTeam := uint8(1 - p.Team)
 			pos := p.GetPosition()
-			s.gameState.DropIntel(oppositeTeam, pos)
-			s.broadcastIntelDrop(oppositeTeam, pos)
+			groundPos := s.getGroundIntelDropPosition(pos)
+			s.gameState.DropIntel(oppositeTeam, groundPos)
+			s.broadcastIntelDrop(oppositeTeam, groundPos)
 			p.Lock()
 			p.HasIntel = false
 			p.Unlock()
@@ -2653,6 +2670,57 @@ func (s *Server) broadcastMoveObject(team uint8, position protocol.Vector3f) {
 	s.broadcastPacket(&packet, true)
 }
 
+// sends a position/orientation packet for a player without updating server state
+// if player id is 255, broadcasts to all players
+func (s *Server) SendPlayerPositionPacketTo(playerID uint8, pos, ori protocol.Vector3f, toPlayerID uint8) {
+	if !s.running {
+		return
+	}
+
+	packet := protocol.PacketPositionData{
+		X: pos.X,
+		Y: pos.Y,
+		Z: pos.Z,
+	}
+
+	data, err := marshalPacket(&packet)
+	if err != nil {
+		s.logger.Error("failed to encode position packet", "error", err)
+		return
+	}
+
+	if toPlayerID == 255 {
+		// broadcast to all players
+		if err := s.network.Broadcast(data, false); err != nil {
+			s.logger.Error("failed to broadcast position packet", "error", err)
+		}
+	} else {
+		// send to specific player
+		targetPlayer, ok := s.gameState.Players.Get(toPlayerID)
+		if ok && targetPlayer.GetState() == player.PlayerStateReady {
+			if err := s.network.SendPacket(targetPlayer.Peer, data, false); err != nil {
+				s.logger.Error("failed to send position packet", "player", toPlayerID, "error", err)
+			}
+		}
+	}
+}
+
+func (s *Server) SendIntelPositionPacketOnly(objectID uint8, team uint8, position protocol.Vector3f) {
+	if !s.running {
+		return
+	}
+
+	packet := protocol.PacketMoveObject{
+		PacketID: uint8(protocol.PacketTypeMoveObject),
+		ObjectID: objectID,
+		Team:     team,
+		X:        position.X,
+		Y:        position.Y,
+		Z:        position.Z,
+	}
+	s.broadcastPacket(&packet, true)
+}
+
 func (s *Server) syncIntelPositions() {
 	if !s.running || !s.intelEnabled() {
 		return
@@ -2816,6 +2884,24 @@ func (s *Server) isNearBase(pos protocol.Vector3f, team uint8) bool {
 	dz := pos.Z - base.Z
 	distSquared := dx*dx + dy*dy + dz*dz
 	return distSquared <= 3.0*3.0
+}
+
+func (s *Server) getGroundIntelDropPosition(pos protocol.Vector3f) protocol.Vector3f {
+	x := int(pos.X)
+	y := int(pos.Y)
+
+	if x < 0 || y < 0 || x >= s.gameState.Map.Width() || y >= s.gameState.Map.Height() {
+		x = max(0, min(x, s.gameState.Map.Width()-1))
+		y = max(0, min(y, s.gameState.Map.Height()-1))
+	}
+
+	groundZ := s.gameState.Map.FindGroundLevel(x, y)
+
+	return protocol.Vector3f{
+		X: float32(x) + 0.5,
+		Y: float32(y) + 0.5,
+		Z: float32(groundZ),
+	}
 }
 
 func (s *Server) checkBabelIntelCapture(p *player.Player, pos protocol.Vector3f) bool {

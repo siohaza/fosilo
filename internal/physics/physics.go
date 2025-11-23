@@ -9,15 +9,16 @@ import (
 )
 
 const (
-	PlayerRadius     = 0.45
-	PlayerEyeHeight  = 0.9
-	PlayerCrouchEye  = 0.45
-	JumpVelocity     = -0.36
-	Epsilon          = 1e-6
-	DiagonalFactor   = 0.70710678
-	FallDamageVel    = 0.58
-	FallSlowDownVel  = 0.24
-	FallDamageScalar = 4096.0
+	PlayerRadius        = 0.45
+	PlayerEyeHeight     = 0.9
+	PlayerCrouchEye     = 0.45
+	JumpVelocity        = -0.36
+	Epsilon             = 1e-6
+	DiagonalFactor      = 0.70710678
+	FallDamageVel       = 0.58
+	FallSlowDownVel     = 0.24
+	FallDamageScalar    = 4096.0
+	MaxVerticalVelocity = 3.0
 )
 
 func MovePlayer(p *player.Player, vxlMap *vxl.Map, dt float32, gameTime float32) int8 {
@@ -134,13 +135,18 @@ func MovePlayer(p *player.Player, vxlMap *vxl.Map, dt float32, gameTime float32)
 		pos.Z = float32(vxlMap.Depth() - 2)
 	}
 
+	clampedOldVelZ := oldVelZ
+	if clampedOldVelZ > MaxVerticalVelocity {
+		clampedOldVelZ = MaxVerticalVelocity
+	}
+
 	var fallDamage int8
-	if math.Abs(float64(vel.Z)) < Epsilon && oldVelZ > FallSlowDownVel {
+	if vel.Z == 0 && clampedOldVelZ > FallSlowDownVel {
 		vel.X *= 0.5
 		vel.Y *= 0.5
 
-		if oldVelZ > FallDamageVel {
-			damage := (oldVelZ - FallDamageVel) * (oldVelZ - FallDamageVel) * FallDamageScalar
+		if clampedOldVelZ > FallDamageVel {
+			damage := (clampedOldVelZ - FallDamageVel) * (clampedOldVelZ - FallDamageVel) * FallDamageScalar
 			if damage > 127 {
 				fallDamage = 127
 			} else if damage < 0 {

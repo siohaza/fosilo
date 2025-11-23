@@ -371,6 +371,23 @@ func (gs *GameState) DropIntel(team uint8, position protocol.Vector3f) {
 		return
 	}
 
+	x := int(position.X)
+	y := int(position.Y)
+	z := int(position.Z)
+
+	if x < 0 || x >= gs.Map.Width() {
+		x = max(0, min(x, gs.Map.Width()-1))
+		position.X = float32(x) + 0.5
+	}
+	if y < 0 || y >= gs.Map.Height() {
+		y = max(0, min(y, gs.Map.Height()-1))
+		position.Y = float32(y) + 0.5
+	}
+	if z < 0 || z >= gs.Map.Depth() {
+		z = max(0, min(z, gs.Map.Depth()-1))
+		position.Z = float32(z)
+	}
+
 	gs.Intel[team].Held = false
 	gs.Intel[team].Position = position
 	gs.Intel[team].CarrierID = 0
