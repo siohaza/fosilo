@@ -14,14 +14,15 @@ If you have no idea how to work with Lua, here is a couple of resources which yo
 4. [Player Modification Functions](#player-modification-functions)
 5. [Team and Score Functions](#team-and-score-functions)
 6. [Chat and Communication Functions](#chat-and-communication-functions)
-7. [Admin and Moderation Functions](#admin-and-moderation-functions)
-8. [Vote Functions](#vote-functions)
-9. [Utility Functions](#utility-functions)
-10. [Timer Functions](#timer-functions)
-11. [System Functions](#system-functions)
-12. [Gamemode System](#gamemode-system)
-13. [Command System](#command-system)
-14. [Constants and Enums](#constants-and-enums)
+7. [Network Packet Functions](#network-packet-functions)
+8. [Admin and Moderation Functions](#admin-and-moderation-functions)
+9. [Vote Functions](#vote-functions)
+10. [Utility Functions](#utility-functions)
+11. [Timer Functions](#timer-functions)
+12. [System Functions](#system-functions)
+13. [Gamemode System](#gamemode-system)
+14. [Command System](#command-system)
+15. [Constants and Enums](#constants-and-enums)
 
 ## Player Table Structure
 
@@ -82,6 +83,7 @@ set_block(256, 256, 32, red)
 | Function | Parameters | Returns | Description |
 |----------|-----------|---------|-------------|
 | `get_player(id)` | `id` (number): Player ID (0-31) | `table`: Player table, or nil if not found | Gets a player by their ID |
+| `get_player_by_id(id)` | `id` (number): Player ID (0-31) | `table`: Player table, or nil if not found | Alias for get_player() |
 | `get_player_count()` | None | `number`: Number of connected players | Gets the number of connected players |
 | `get_player_by_name(name)` | `name` (string): Player name | `table`: Player table, or nil if not found | Finds a player by their name (exact match) |
 | `get_player_position(id)` | `id` (number): Player ID | `number, number, number`: x, y, z coordinates | Gets a player's position |
@@ -136,8 +138,9 @@ end
 
 | Function | Parameters | Returns | Description |
 |----------|-----------|---------|-------------|
-| `set_player_position(id, x, y, z)` | `id` (number): Player ID<br>`x` (number): X coordinate<br>`y` (number): Y coordinate<br>`z` (number): Z coordinate | None | Teleports a player to the specified position |
+| `set_player_position(id, x, y, z)` | `id` (number): Player ID<br>`x` (number): X coordinate<br>`y` (number): Y coordinate<br>`z` (number): Z coordinate | None | Teleports a player to the specified position. Automatically resets velocity to prevent fall damage |
 | `set_player_hp(id, hp)` | `id` (number): Player ID<br>`hp` (number): Health points (0-100) | None | Sets a player's health. Setting HP to 0 will kill the player |
+| `heal_player(id)` | `id` (number): Player ID | None | Fully restocks a player (restores HP to 100, refills ammo, grenades, and blocks) |
 | `set_player_team(id, team)` | `id` (number): Player ID<br>`team` (number): Team number (0 or 1) | None | Changes a player's team |
 | `set_player_weapon(id, weapon)` | `id` (number): Player ID<br>`weapon` (number): Weapon type (0=Rifle, 1=SMG, 2=Shotgun) | None | Changes a player's weapon |
 | `set_player_ammo(id, magazine, reserve)` | `id` (number): Player ID<br>`magazine` (number): Magazine ammo<br>`reserve` (number): Reserve ammo | None | Sets a player's ammunition |
@@ -191,6 +194,57 @@ set_team_score(0, score + 1)
 broadcast_chat("Round starting in 5 seconds!")
 ```
 
+## Network Packet Functions
+
+These functions send network packets to clients without updating server side state.
+
+| Function | Parameters | Returns | Description |
+|----------|-----------|---------|-------------|
+| `send_player_position_packet(player_id, x, y, z, ox, oy, oz, to_player_id)` | `player_id` (number): Player ID to show position for<br>`x, y, z` (number): Position coordinates<br>`ox, oy, oz` (number): Orientation vector<br>`to_player_id` (number): Target player ID (255 to broadcast to all) | None | Sends a position/orientation packet without updating server state. Useful for visual-only position updates |
+| `send_intel_position_packet(object_id, team, x, y, z)` | `object_id` (number): Intel/object ID (0-1)<br>`team` (number): Team number (0 or 1)<br>`x, y, z` (number): Position coordinates | None | Sends a MoveObject packet without updating intel state. Perfect for using intel packets as HP bars or custom indicators |
+| `send_territory_capture(player_id, entity_id, winning, state)` | `player_id` (number): Player ID<br>`entity_id` (number): Territory entity ID<br>`winning` (number): Winning team<br>`state` (number): Territory state | None | Sends a territory capture packet. Already packet-only, doesn't update state |
+| `send_progress_bar(entity_id, capturing_team, rate, progress)` | `entity_id` (number): Entity ID<br>`capturing_team` (number): Capturing team<br>`rate` (number): Capture rate (-128 to 127)<br>`progress` (number): Progress value (0.0 to 1.0) | None | Sends a progress bar packet. Perfect for custom progress indicators |
+
+### Example: Network Packet Functions
+
+```lua
+-- Display Team 0's HP as a floating intel object
+function update_hp_display()
+    local team0_hp = calculate_team_hp(0)
+    local hp_x = 256
+    local hp_y = 256
+    local hp_z = 10 + (team0_hp / 10)  -- Height based on HP
+
+    -- Shows intel at position without actually moving the real intel
+    send_intel_position_packet(0, 0, hp_x, hp_y, hp_z)
+end
+
+-- Show painting progress using a progress bar
+function show_paint_progress(player, painted_blocks, total_blocks)
+    local progress = painted_blocks / total_blocks
+    local rate = 10  -- Positive rate shows as "capturing"
+
+    send_progress_bar(player.id, player.team, rate, progress)
+end
+
+-- Send a visual position update to specific player
+function show_ghost_position(ghost_player_id, x, y, z, viewer_id)
+    local ox, oy, oz = 0, 0, 0  -- Default orientation
+
+    -- Only the viewer sees the ghost, doesn't actually move the player
+    send_player_position_packet(ghost_player_id, x, y, z, ox, oy, oz, viewer_id)
+end
+
+-- Broadcast visual effect to all players
+function show_flag_carrier_beacon(carrier_id)
+    local x, y, z = get_player_position(carrier_id)
+    z = z - 5  -- Show beacon above carrier
+
+    -- Broadcast to all players (255 = broadcast)
+    send_intel_position_packet(1, carrier_id.team, x, y, z)
+end
+```
+
 ## Admin and Moderation Functions
 
 | Function | Parameters | Returns | Description |
@@ -199,6 +253,7 @@ broadcast_chat("Round starting in 5 seconds!")
 | `unban_ip(ip)` | `ip` (string): IP address to unban | `boolean, string`: Success status, error message | Unbans an IP address |
 | `is_banned(ip)` | `ip` (string): IP address to check | `boolean`: True if banned | Checks if an IP address is banned |
 | `kick_player_cmd(id, reason)` | `id` (number): Player ID<br>`reason` (string): Kick reason | `boolean, string`: Success status, error message | Kicks a player from the server |
+| `disconnect_player(id, reason_code)` | `id` (number): Player ID<br>`reason_code` (number): Disconnect reason code | `boolean, string`: Success status, error message | Disconnects a player with a specific disconnect reason code |
 | `has_permission(player_id, permission)` | `player_id` (number): Player ID<br>`permission` (string): Permission level to check ("trusted", "guard", "moderator", "admin", "manager") | `boolean`: True if player has permission | Checks if a player has a specific permission level or higher |
 
 ### Example: Admin and Moderation Functions
@@ -311,6 +366,7 @@ end
 | `get_config_password(role)` | `role` (string): Role name ("trusted", "guard", "moderator", "admin", "manager") | `string`: Password, or empty string if not set | Gets the password for a permission role from the config |
 | `get_server_name()` | None | `string`: Server name from configuration | Gets the server name |
 | `get_server_time()` | None | `number`: Server uptime in seconds | Gets the server uptime |
+| `save_map(filename)` | `filename` (string): Filename to save to (optional, defaults to current map name with .saved suffix) | `boolean, string`: Success status and saved file path, or error message | Saves the current map state to a .vxl file in the maps/ directory |
 | `create_explosion(x, y, z)` | `x` (number): X coordinate<br>`y` (number): Y coordinate<br>`z` (number): Z coordinate | `boolean, string`: Success status, error message | Not yet implemented |
 
 ## Gamemode System

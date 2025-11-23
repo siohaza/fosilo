@@ -41,6 +41,8 @@ type ServerInterface interface {
 	SaveMap(filename string) (string, error)
 	BroadcastTerritoryCapture(playerID, entityID, winning, state uint8)
 	BroadcastProgressBar(entityID, capturingTeam uint8, rate int8, progress float32)
+	SendPlayerPositionPacketTo(playerID uint8, pos, ori protocol.Vector3f, toPlayerID uint8)
+	SendIntelPositionPacketOnly(objectID uint8, team uint8, position protocol.Vector3f)
 }
 
 type GameAPI struct {
@@ -172,6 +174,9 @@ func (api *GameAPI) RegisterFunctions(vm *VM) {
 	state.Register("send_territory_capture", api.sendTerritoryCapture)
 	state.Register("send_progress_bar", api.sendProgressBar)
 	state.Register("get_config_value", api.getConfigValue)
+
+	state.Register("send_player_position_packet", api.sendPlayerPositionPacket)
+	state.Register("send_intel_position_packet", api.sendIntelPositionPacket)
 }
 
 func (api *GameAPI) findTopBlock(state *lua.State) int {
@@ -447,6 +452,8 @@ func (api *GameAPI) setPlayerPosition(state *lua.State) int {
 	if p != nil {
 		p.Lock()
 		p.Position = protocol.Vector3f{X: x, Y: y, Z: z}
+		p.EyePos = protocol.Vector3f{X: x, Y: y, Z: z}
+		p.Velocity = protocol.Vector3f{X: 0, Y: 0, Z: 0}
 		p.Unlock()
 	}
 
@@ -1292,12 +1299,20 @@ func (api *GameAPI) setPlayerBlocks(state *lua.State) int {
 func (api *GameAPI) respawnPlayer(state *lua.State) int {
 	id, _ := state.ToInteger(1)
 
-	p, _ := api.gameState.Players.Get(uint8(id))
-	if p != nil {
-		p.Lock()
-		p.Alive = true
-		p.HP = 100
-		p.Unlock()
+	if api.server != nil {
+		api.server.RespawnPlayer(uint8(id))
+	} else {
+		p, _ := api.gameState.Players.Get(uint8(id))
+		if p != nil {
+			spawnX, spawnY, spawnZ := float32(256), float32(256), float32(32)
+			if api.gameState != nil && p.Team <= 1 {
+				base := api.gameState.Base[p.Team]
+				spawnX, spawnY, spawnZ = base.X, base.Y, base.Z
+			}
+
+			spawnPos := protocol.Vector3f{X: spawnX, Y: spawnY, Z: spawnZ}
+			p.Respawn(spawnPos)
+		}
 	}
 
 	return 0
@@ -1834,4 +1849,50 @@ func (api *GameAPI) getConfigValue(state *lua.State) int {
 	}
 
 	return 1
+}
+
+func (api *GameAPI) sendPlayerPositionPacket(state *lua.State) int {
+	playerID, _ := state.ToInteger(1)
+	xNum, _ := state.ToNumber(2)
+	x := float32(xNum)
+	yNum, _ := state.ToNumber(3)
+	y := float32(yNum)
+	zNum, _ := state.ToNumber(4)
+	z := float32(zNum)
+	oxNum, _ := state.ToNumber(5)
+	ox := float32(oxNum)
+	oyNum, _ := state.ToNumber(6)
+	oy := float32(oyNum)
+	ozNum, _ := state.ToNumber(7)
+	oz := float32(ozNum)
+	toPlayerID, _ := state.ToInteger(8)
+
+	if api.server == nil {
+		return 0
+	}
+
+	pos := protocol.Vector3f{X: x, Y: y, Z: z}
+	ori := protocol.Vector3f{X: ox, Y: oy, Z: oz}
+
+	api.server.SendPlayerPositionPacketTo(uint8(playerID), pos, ori, uint8(toPlayerID))
+	return 0
+}
+
+func (api *GameAPI) sendIntelPositionPacket(state *lua.State) int {
+	objectID, _ := state.ToInteger(1)
+	team, _ := state.ToInteger(2)
+	xNum, _ := state.ToNumber(3)
+	x := float32(xNum)
+	yNum, _ := state.ToNumber(4)
+	y := float32(yNum)
+	zNum, _ := state.ToNumber(5)
+	z := float32(zNum)
+
+	if api.server == nil {
+		return 0
+	}
+
+	pos := protocol.Vector3f{X: x, Y: y, Z: z}
+	api.server.SendIntelPositionPacketOnly(uint8(objectID), uint8(team), pos)
+	return 0
 }
