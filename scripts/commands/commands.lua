@@ -12,32 +12,46 @@ if command_list_formatter == nil then
             return "No commands available"
         end
 
-        local entries = {}
+        local names = {}
         for i = 1, #commands do
-            local cmd = commands[i]
-            local entry = "/" .. cmd.name
-
-            if cmd.aliases and #cmd.aliases > 0 then
-                local alias_list = {}
-                for j = 1, #cmd.aliases do
-                    local alias = cmd.aliases[j]
-                    if alias ~= nil and alias ~= "" then
-                        table.insert(alias_list, "/" .. alias)
-                    end
-                end
-                if #alias_list > 0 then
-                    entry = entry .. " (aliases: " .. table.concat(alias_list, ", ") .. ")"
-                end
-            end
-
-            table.insert(entries, entry)
+            table.insert(names, commands[i].name)
         end
 
-        table.sort(entries, function(a, b)
+        table.sort(names, function(a, b)
             return a:lower() < b:lower()
         end)
 
-        return "Available commands: " .. table.concat(entries, ", ") .. " - Use /help <command> for more info"
+        local lines = {}
+        local current_line = ""
+
+        for i = 1, #names do
+            local cmd = "/" .. names[i]
+            local test_line = current_line
+            if test_line ~= "" then
+                test_line = test_line .. ", " .. cmd
+            else
+                test_line = cmd
+            end
+
+            if #test_line > 60 then
+                if current_line ~= "" then
+                    table.insert(lines, current_line)
+                end
+                current_line = cmd
+            else
+                current_line = test_line
+            end
+        end
+
+        if current_line ~= "" then
+            table.insert(lines, current_line)
+        end
+
+        for i = 1, #lines do
+            send_chat(player.id, lines[i])
+        end
+
+        return "Type /help <command> for details"
     end
 end
 
