@@ -252,6 +252,7 @@ func (m *Map) loadFromData(data []byte) error {
 					m.setGeometry(x, y, z, false)
 				}
 
+				topLength := int(s.colorEnd) - int(s.colorStart) + 1
 				for z := int(s.colorStart); z <= int(s.colorEnd); z++ {
 					idx := (z - int(s.colorStart)) * 4
 					color := uint32(colorData[idx]) |
@@ -265,6 +266,23 @@ func (m *Map) loadFromData(data []byte) error {
 
 				if s.length == 0 {
 					break
+				}
+
+				bottomLength := int(s.length) - 1 - topLength
+				if bottomLength > 0 {
+					if offset+4 > len(data) {
+						return fmt.Errorf("unexpected end of data reading next span")
+					}
+					nextAirStart := int(data[offset+3])
+					for i := 0; i < bottomLength; i++ {
+						z := nextAirStart - bottomLength + i
+						idx := (topLength + i) * 4
+						color := uint32(colorData[idx]) |
+							uint32(colorData[idx+1])<<8 |
+							uint32(colorData[idx+2])<<16 |
+							uint32(colorData[idx+3])<<24
+						c.append(newPosition(uint32(x), uint32(y), uint32(z)), color&0xFFFFFF)
+					}
 				}
 			}
 		}
@@ -434,13 +452,13 @@ func (m *Map) updateNeighborSurfaces(x, y, z int) {
 
 	for _, n := range neighbors {
 		if m.IsSolid(n[0], n[1], n[2]) && !m.OnSurface(n[0], n[1], n[2]) {
-			m.removeAir(n[0], n[1], n[2])
+			m.removeColorEntry(n[0], n[1], n[2])
 		}
 	}
 }
 
-func (m *Map) removeAir(x, y, z int) {
-	if !m.IsInside(x, y, z) || z == m.depth-1 {
+func (m *Map) removeColorEntry(x, y, z int) {
+	if !m.IsInside(x, y, z) {
 		return
 	}
 
@@ -450,14 +468,12 @@ func (m *Map) removeAir(x, y, z int) {
 
 	if c := m.chunkAt(x, y); c != nil {
 		pos := newPosition(uint32(x), uint32(y), uint32(z))
-		if c.remove(pos) {
-			m.setGeometry(x, y, z, false)
-		}
+		c.remove(pos)
 	}
 }
 
 func (m *Map) SetAir(x, y, z int) {
-	if !m.IsInside(x, y, z) || z == m.depth-2 {
+	if !m.IsInside(x, y, z) || z >= m.depth-1 {
 		return
 	}
 
@@ -475,7 +491,8 @@ func (m *Map) SetAir(x, y, z int) {
 		{x, y, z - 1, m.IsSolid(x, y, z-1) && m.OnSurface(x, y, z-1)},
 	}
 
-	m.removeAir(x, y, z)
+	m.removeColorEntry(x, y, z)
+	m.setGeometry(x, y, z, false)
 
 	for _, n := range neighbors {
 		if !n.wasSurface && m.OnSurface(n.x, n.y, n.z) {

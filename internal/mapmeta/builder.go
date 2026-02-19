@@ -4,6 +4,15 @@ import (
 	"math"
 )
 
+func envLookup(env map[string]Value, keys ...string) (Value, bool) {
+	for _, key := range keys {
+		if v, ok := env[key]; ok {
+			return v, true
+		}
+	}
+	return Value{}, false
+}
+
 func buildMetadata(env map[string]Value) *Metadata {
 	meta := &Metadata{
 		Metadata: MetadataInfo{},
@@ -14,26 +23,22 @@ func buildMetadata(env map[string]Value) *Metadata {
 		Extensions: make(map[string]any),
 	}
 
-	if v, ok := env["name"]; ok {
+	if v, ok := envLookup(env, "name", "Name", "nname", "ame"); ok {
 		if s, err := v.asString(); err == nil {
 			meta.Metadata.Name = s
 		}
 	}
-	if v, ok := env["version"]; ok {
+	if v, ok := envLookup(env, "version", "Version"); ok {
 		if s, err := v.asString(); err == nil {
 			meta.Metadata.Version = s
 		}
 	}
-	if v, ok := env["author"]; ok {
+	if v, ok := envLookup(env, "author", "Author"); ok {
 		if s, err := v.asString(); err == nil {
 			meta.Metadata.Author = s
 		}
 	}
-	if v, ok := env["description"]; ok {
-		if s, err := v.asString(); err == nil {
-			meta.Metadata.Description = s
-		}
-	} else if v, ok := env["desc"]; ok {
+	if v, ok := envLookup(env, "description", "Description", "desc"); ok {
 		if s, err := v.asString(); err == nil {
 			meta.Metadata.Description = s
 		}
@@ -49,7 +54,9 @@ func buildMetadata(env map[string]Value) *Metadata {
 		}
 	}
 
+	var extDict map[string]Value
 	if v, ok := env["extensions"]; ok && v.kind == valueDict {
+		extDict = v.dict
 		for key, entry := range v.dict {
 			if val := entry.toInterface(); val != nil {
 				meta.Extensions[key] = val
@@ -76,6 +83,11 @@ func buildMetadata(env map[string]Value) *Metadata {
 	}
 	if v, ok := env["spawn_locations_green"]; ok {
 		meta.Spawns.Green = toMatrix(v, 3)
+	}
+
+	// Extract spawns from extensions dict (arena/push game modes)
+	if extDict != nil {
+		extractExtensionSpawns(meta, extDict)
 	}
 
 	if v, ok := env["BLUE_RECT"]; ok {
@@ -187,10 +199,11 @@ func toMatrix(v Value, rowLen int) [][]float64 {
 			continue
 		}
 		values := toFloatSlice(item, 0)
-		if len(values) < rowLen {
-			continue
+		if len(values) >= rowLen {
+			rows = append(rows, values[:rowLen])
+		} else if rowLen == 3 && len(values) == 2 {
+			rows = append(rows, []float64{values[0], values[1], 0})
 		}
-		rows = append(rows, values[:rowLen])
 	}
 	if len(rows) == 0 {
 		return nil
@@ -214,4 +227,68 @@ func toStringSlice(v Value) []string {
 
 func clampFloat(v float64, min, max float64) float64 {
 	return math.Min(math.Max(v, min), max)
+}
+
+func extractExtensionSpawns(meta *Metadata, ext map[string]Value) {
+	// Arena mode spawns
+	if len(meta.Spawns.Blue) == 0 {
+		if v, ok := ext["arena_blue_spawns"]; ok {
+			if spawns := toMatrix(v, 3); len(spawns) > 0 {
+				meta.Spawns.Blue = spawns
+			}
+		}
+		if len(meta.Spawns.Blue) == 0 {
+			if v, ok := ext["arena_blue_spawn"]; ok {
+				if pt := toFloatSlice(v, 3); len(pt) == 3 {
+					meta.Spawns.Blue = [][]float64{pt}
+				}
+			}
+		}
+	}
+	if len(meta.Spawns.Green) == 0 {
+		if v, ok := ext["arena_green_spawns"]; ok {
+			if spawns := toMatrix(v, 3); len(spawns) > 0 {
+				meta.Spawns.Green = spawns
+			}
+		}
+		if len(meta.Spawns.Green) == 0 {
+			if v, ok := ext["arena_green_spawn"]; ok {
+				if pt := toFloatSlice(v, 3); len(pt) == 3 {
+					meta.Spawns.Green = [][]float64{pt}
+				}
+			}
+		}
+	}
+
+	// Push mode spawns
+	if len(meta.Spawns.Blue) == 0 {
+		if v, ok := ext["push_blue_spawn"]; ok {
+			if pt := toFloatSlice(v, 3); len(pt) == 3 {
+				meta.Spawns.Blue = [][]float64{pt}
+			}
+		}
+	}
+	if len(meta.Spawns.Green) == 0 {
+		if v, ok := ext["push_green_spawn"]; ok {
+			if pt := toFloatSlice(v, 3); len(pt) == 3 {
+				meta.Spawns.Green = [][]float64{pt}
+			}
+		}
+	}
+
+	// Push mode checkpoints as entity base positions
+	if len(meta.Entities.Blue.Base) == 0 {
+		if v, ok := ext["push_blue_cp"]; ok {
+			if pt := toFloatSlice(v, 3); len(pt) == 3 {
+				meta.Entities.Blue.Base = pt
+			}
+		}
+	}
+	if len(meta.Entities.Green.Base) == 0 {
+		if v, ok := ext["push_green_cp"]; ok {
+			if pt := toFloatSlice(v, 3); len(pt) == 3 {
+				meta.Entities.Green.Base = pt
+			}
+		}
+	}
 }

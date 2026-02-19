@@ -57,14 +57,12 @@ func MovePlayer(p *player.Player, vxlMap *vxl.Map, dt float32, gameTime float32)
 	ori := p.Orientation
 	p.RUnlock()
 
-	frontDir := protocol.Vector3f{X: ori.X, Y: ori.Y, Z: 0}
-	frontLen := float32(math.Sqrt(float64(frontDir.X*frontDir.X + frontDir.Y*frontDir.Y)))
+	frontLen := float32(math.Sqrt(float64(ori.X*ori.X + ori.Y*ori.Y)))
+	rightDir := protocol.Vector3f{X: 0, Y: 0, Z: 0}
 	if frontLen > 0 {
-		frontDir.X /= frontLen
-		frontDir.Y /= frontLen
+		rightDir.X = -ori.Y / frontLen
+		rightDir.Y = ori.X / frontLen
 	}
-
-	rightDir := protocol.Vector3f{X: -frontDir.Y, Y: frontDir.X, Z: 0}
 
 	accel := dt
 	if airborne {
@@ -81,12 +79,13 @@ func MovePlayer(p *player.Player, vxlMap *vxl.Map, dt float32, gameTime float32)
 		accel *= DiagonalFactor
 	}
 
+	// Forward direction uses raw orientation (speed depends on look angle)
 	if forward {
-		vel.X += frontDir.X * accel
-		vel.Y += frontDir.Y * accel
+		vel.X += ori.X * accel
+		vel.Y += ori.Y * accel
 	} else if backward {
-		vel.X -= frontDir.X * accel
-		vel.Y -= frontDir.Y * accel
+		vel.X -= ori.X * accel
+		vel.Y -= ori.Y * accel
 	}
 
 	if left {
@@ -97,10 +96,10 @@ func MovePlayer(p *player.Player, vxlMap *vxl.Map, dt float32, gameTime float32)
 		vel.Y += rightDir.Y * accel
 	}
 
-	oldVelZ := vel.Z
 	friction := dt + 1
 	vel.Z += dt
 	vel.Z /= friction
+	oldVelZ := vel.Z
 
 	if wade {
 		friction = dt*6 + 1
@@ -250,11 +249,18 @@ func ValidateHit(shooter, target protocol.Vector3f, orientation protocol.Vector3
 	return x-r < 0 && x+r > 0 && y-r < 0 && y+r > 0
 }
 
-func checkAxisCollision(vxlMap *vxl.Map, coord1, coord2Fixed1, coord2Fixed2, nz, bodyHeight float32) bool {
+func checkAxisCollision(vxlMap *vxl.Map, movingCoord, fixed1, fixed2, nz, bodyHeight float32, yAxis bool) bool {
 	z := bodyHeight
 	for z >= -1.36 {
-		if clipBox(vxlMap, coord1, coord2Fixed1, nz+z) ||
-			clipBox(vxlMap, coord1, coord2Fixed2, nz+z) {
+		var hit bool
+		if yAxis {
+			hit = clipBox(vxlMap, fixed1, movingCoord, nz+z) ||
+				clipBox(vxlMap, fixed2, movingCoord, nz+z)
+		} else {
+			hit = clipBox(vxlMap, movingCoord, fixed1, nz+z) ||
+				clipBox(vxlMap, movingCoord, fixed2, nz+z)
+		}
+		if hit {
 			return true
 		}
 		z -= 0.9
@@ -262,11 +268,18 @@ func checkAxisCollision(vxlMap *vxl.Map, coord1, coord2Fixed1, coord2Fixed2, nz,
 	return false
 }
 
-func checkAxisClimbCollision(vxlMap *vxl.Map, coord1, coord2Fixed1, coord2Fixed2, nz float32) bool {
+func checkAxisClimbCollision(vxlMap *vxl.Map, movingCoord, fixed1, fixed2, nz float32, yAxis bool) bool {
 	z := float32(0.35)
 	for z >= -2.36 {
-		if clipBox(vxlMap, coord1, coord2Fixed1, nz+z) ||
-			clipBox(vxlMap, coord1, coord2Fixed2, nz+z) {
+		var hit bool
+		if yAxis {
+			hit = clipBox(vxlMap, fixed1, movingCoord, nz+z) ||
+				clipBox(vxlMap, fixed2, movingCoord, nz+z)
+		} else {
+			hit = clipBox(vxlMap, movingCoord, fixed1, nz+z) ||
+				clipBox(vxlMap, movingCoord, fixed2, nz+z)
+		}
+		if hit {
 			return true
 		}
 		z -= 0.9
@@ -303,12 +316,12 @@ func boxClipMove(vxlMap *vxl.Map, pos, vel protocol.Vector3f, dt, eyeHeight, bod
 		xDir = PlayerRadius
 	}
 
-	hasCollisionX := checkAxisCollision(vxlMap, nx+xDir, pos.Y-PlayerRadius, pos.Y+PlayerRadius, nz, bodyHeight)
+	hasCollisionX := checkAxisCollision(vxlMap, nx+xDir, pos.Y-PlayerRadius, pos.Y+PlayerRadius, nz, bodyHeight, false)
 
 	if !hasCollisionX {
 		pos.X = nx
 	} else if canClimb {
-		canClimbX := !checkAxisClimbCollision(vxlMap, nx+xDir, pos.Y-PlayerRadius, pos.Y+PlayerRadius, nz)
+		canClimbX := !checkAxisClimbCollision(vxlMap, nx+xDir, pos.Y-PlayerRadius, pos.Y+PlayerRadius, nz, false)
 		if canClimbX {
 			pos.X = nx
 			climb = true
@@ -324,12 +337,12 @@ func boxClipMove(vxlMap *vxl.Map, pos, vel protocol.Vector3f, dt, eyeHeight, bod
 		yDir = PlayerRadius
 	}
 
-	hasCollisionY := checkAxisCollision(vxlMap, ny+yDir, pos.X-PlayerRadius, pos.X+PlayerRadius, nz, bodyHeight)
+	hasCollisionY := checkAxisCollision(vxlMap, ny+yDir, pos.X-PlayerRadius, pos.X+PlayerRadius, nz, bodyHeight, true)
 
 	if !hasCollisionY {
 		pos.Y = ny
 	} else if canClimb && !climb {
-		canClimbY := !checkAxisClimbCollision(vxlMap, ny+yDir, pos.X-PlayerRadius, pos.X+PlayerRadius, nz)
+		canClimbY := !checkAxisClimbCollision(vxlMap, ny+yDir, pos.X-PlayerRadius, pos.X+PlayerRadius, nz, true)
 		if canClimbY {
 			pos.Y = ny
 			climb = true
@@ -461,13 +474,17 @@ func MoveGrenade(vxlMap *vxl.Map, position, velocity *protocol.Vector3f, dt floa
 		return 0
 	}
 	sz := newZ
+	isSolid := false
 	if sz == vxlMap.Depth()-1 {
 		sz = vxlMap.Depth() - 2
+		isSolid = vxlMap.IsSolid(newX, newY, sz)
 	} else if sz >= vxlMap.Depth() {
-		return 0
+		isSolid = true // below water level = solid for grenades
+	} else {
+		isSolid = vxlMap.IsSolid(newX, newY, sz)
 	}
 
-	if !vxlMap.IsSolid(newX, newY, sz) {
+	if !isSolid {
 		return 0
 	}
 

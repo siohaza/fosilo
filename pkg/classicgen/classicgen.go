@@ -25,7 +25,7 @@ type noiseContext struct {
 }
 
 type vcol struct {
-	r, g, b, a uint8
+	r, g, b uint8
 }
 
 func (nc *noiseContext) getRandom() uint32 {
@@ -181,6 +181,7 @@ func Generate(seed uint32) (*vxl.Map, error) {
 
 	buf := make([]vcol, vsid*vsid)
 	amb := make([]vcol, vsid*vsid)
+	heights := make([]int, vsid*vsid)
 
 	var amplut [octMax]float64
 	var msklut [octMax]int
@@ -261,7 +262,7 @@ func Generate(seed uint32) (*vxl.Map, error) {
 
 			d = (nx*0.5 + ny*0.25 - nz) / math.Sqrt(0.5*0.5+0.25*0.25+1.0*1.0)
 			d *= 1.2
-			buf[k].a = uint8(63 - samp[0])
+			heights[k] = int(63 - samp[0])
 			buf[k].r = uint8(clamp(gr*d, 0, float64(255-maxa)))
 			buf[k].g = uint8(clamp(gg*d, 0, float64(255-maxa)))
 			buf[k].b = uint8(clamp(gb*d, 0, float64(255-maxa)))
@@ -287,7 +288,13 @@ func Generate(seed uint32) (*vxl.Map, error) {
 	for y := 0; y < vsid; y++ {
 		for x := 0; x < vsid; x++ {
 			k := getHeightPos(x, y)
-			height := int(buf[k].a)
+			height := heights[k]
+			if height < 0 {
+				continue // underwater no terrain
+			}
+			if height > 63 {
+				height = 63
+			}
 			color := uint32(buf[k].b) | uint32(buf[k].g)<<8 | uint32(buf[k].r)<<16
 
 			for z := 63; z >= height; z-- {

@@ -126,6 +126,8 @@ func (api *GameAPI) RegisterFunctions(vm *VM) {
 	state.Register("get_available_commands", api.getAvailableCommands)
 	state.Register("has_permission", api.hasPermission)
 	state.Register("set_player_permission", api.setPlayerPermission)
+	state.Register("get_login_retries", api.getLoginRetries)
+	state.Register("set_login_retries", api.setLoginRetries)
 	state.Register("get_config_password", api.getConfigPassword)
 	state.Register("get_map_name", api.getMapName)
 	state.Register("save_map", api.saveMap)
@@ -1166,6 +1168,33 @@ func (api *GameAPI) setPlayerPermission(state *lua.State) int {
 	state.PushBoolean(true)
 	state.PushString("")
 	return 2
+}
+
+func (api *GameAPI) getLoginRetries(state *lua.State) int {
+	playerID, _ := state.ToInteger(1)
+	p, exists := api.gameState.Players.Get(uint8(playerID))
+	if !exists {
+		state.PushInteger(0)
+		return 1
+	}
+	p.RLock()
+	retries := p.LoginRetries
+	p.RUnlock()
+	state.PushInteger(retries)
+	return 1
+}
+
+func (api *GameAPI) setLoginRetries(state *lua.State) int {
+	playerID, _ := state.ToInteger(1)
+	count, _ := state.ToInteger(2)
+	p, exists := api.gameState.Players.Get(uint8(playerID))
+	if !exists {
+		return 0
+	}
+	p.Lock()
+	p.LoginRetries = count
+	p.Unlock()
+	return 0
 }
 
 func (api *GameAPI) getConfigPassword(state *lua.State) int {

@@ -124,6 +124,10 @@ func convertMetadataFile(filename string) (*mapmeta.Metadata, error) {
 		return nil, err
 	}
 
+	if metadata.Metadata.Name == "" {
+		metadata.Metadata.Name = strings.TrimSuffix(filepath.Base(filename), ".txt")
+	}
+
 	applySpawnFallbacks(metadata, content)
 	applyEntityFallbacks(metadata, content)
 
@@ -151,6 +155,12 @@ func applySpawnFallbacks(meta *mapmeta.Metadata, content string) {
 	if len(meta.Spawns.Green) == 0 && len(meta.Spawns.GreenArea) == 0 {
 		meta.Spawns.GreenArea = extractSpawnArea(content, "GREEN")
 	}
+	if len(meta.Spawns.Blue) == 0 && len(meta.Spawns.BlueArea) == 0 {
+		meta.Spawns.BlueArea = extractRandRangeSpawnArea(content, "blue")
+	}
+	if len(meta.Spawns.Green) == 0 && len(meta.Spawns.GreenArea) == 0 {
+		meta.Spawns.GreenArea = extractRandRangeSpawnArea(content, "green")
+	}
 }
 
 func applyEntityFallbacks(meta *mapmeta.Metadata, content string) {
@@ -165,6 +175,19 @@ func applyEntityFallbacks(meta *mapmeta.Metadata, content string) {
 
 	blueFlag, blueBase := extractEntityLocations(content, "BLUE")
 	greenFlag, greenBase := extractEntityLocations(content, "GREEN")
+
+	if len(blueFlag) == 0 {
+		blueFlag = extractEntityWithVariables(content, "BLUE_FLAG")
+	}
+	if len(blueBase) == 0 {
+		blueBase = extractEntityWithVariables(content, "BLUE_BASE")
+	}
+	if len(greenFlag) == 0 {
+		greenFlag = extractEntityWithVariables(content, "GREEN_FLAG")
+	}
+	if len(greenBase) == 0 {
+		greenBase = extractEntityWithVariables(content, "GREEN_BASE")
+	}
 
 	if blueFlagMissing && len(blueFlag) == 3 {
 		meta.Entities.Blue.Flag = blueFlag
@@ -305,6 +328,59 @@ func isValidCoordinate(coord []float64) bool {
 		}
 	}
 	return true
+}
+
+func extractRandRangeSpawnArea(content, team string) []float64 {
+	teamCheck := team + "_team"
+
+	pattern := fmt.Sprintf(`(?s)if\s+connection\.team\s+is\s+connection\.protocol\.%s.*?(\w+)\s*=\s*random\.(?:randrange|randint)\(\s*(\d+)\s*,\s*(\d+)\s*\).*?(\w+)\s*=\s*random\.(?:randrange|randint)\(\s*(\d+)\s*,\s*(\d+)\s*\)`, teamCheck)
+	re := regexp.MustCompile(pattern)
+	matches := re.FindStringSubmatch(content)
+	if len(matches) != 7 {
+		return nil
+	}
+
+	xMin, _ := strconv.ParseFloat(matches[2], 64)
+	xMax, _ := strconv.ParseFloat(matches[3], 64)
+	yMin, _ := strconv.ParseFloat(matches[5], 64)
+	yMax, _ := strconv.ParseFloat(matches[6], 64)
+
+	return []float64{xMin, yMin, xMax, yMax}
+}
+
+func extractEntityWithVariables(content, entityConst string) []float64 {
+	/* HELP ME
+	SET ME FREE
+	AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+	*/
+	patterns := []string{
+		fmt.Sprintf(`(?s)if\s+entity_id\s*==\s*%s[^}]*?(\w+)\s*,\s*(\w+)\s*,\s*(\w+)\s*=\s*([0-9.]+)\s*,\s*([0-9.]+)\s*,\s*([0-9.]+)`, entityConst),
+	}
+
+	numericMap := map[string]string{
+		"BLUE_FLAG":  "0",
+		"GREEN_FLAG": "1",
+		"BLUE_BASE":  "2",
+		"GREEN_BASE": "3",
+	}
+	if num, ok := numericMap[entityConst]; ok {
+		patterns = append(patterns,
+			fmt.Sprintf(`(?s)if\s+entity_id\s*==\s*%s[^}]*?(\w+)\s*,\s*(\w+)\s*,\s*(\w+)\s*=\s*([0-9.]+)\s*,\s*([0-9.]+)\s*,\s*([0-9.]+)`, num),
+		)
+	}
+
+	for _, pattern := range patterns {
+		re := regexp.MustCompile(pattern)
+		matches := re.FindStringSubmatch(content)
+		if len(matches) == 7 {
+			x, _ := strconv.ParseFloat(matches[4], 64)
+			y, _ := strconv.ParseFloat(matches[5], 64)
+			z, _ := strconv.ParseFloat(matches[6], 64)
+			return []float64{x, y, z}
+		}
+	}
+
+	return nil
 }
 
 func writeToml(filename string, metadata *mapmeta.Metadata) error {

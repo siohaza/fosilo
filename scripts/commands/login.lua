@@ -32,8 +32,16 @@ function execute(player, args)
     end
 
     if password ~= config_password then
-        return "Incorrect password"
+        local retries = get_login_retries(player.id) + 1
+        set_login_retries(player.id, retries)
+        if retries >= 3 then
+            kick_player_cmd(player.id, "Too many failed login attempts")
+            return ""
+        end
+        return "Incorrect password (" .. (3 - retries) .. " attempts remaining)"
     end
+
+    set_login_retries(player.id, 0)
 
     local success, err = set_player_permission(player.id, role)
     if not success then

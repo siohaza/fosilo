@@ -706,7 +706,7 @@ func (s *Server) update() {
 		if p.IsAlive() {
 			fallDamage := physics.MovePlayer(p, s.gameState.Map, dt, gameTime)
 			if fallDamage > 0 {
-				if s.damagePlayer(p.ID, uint8(fallDamage), p.GetPosition(), uint8(protocol.KillTypeFall)) {
+				if s.damagePlayer(p.ID, uint8(fallDamage), p.GetPosition(), protocol.HurtTypeFall) {
 					s.handleEnvironmentKill(p, protocol.KillTypeFall)
 				}
 			}
@@ -1265,7 +1265,7 @@ func (s *Server) processShot(shooter *player.Player, eyePos, direction protocol.
 
 		if !hit || playerDistance < terrainDistance {
 			damage := physics.CalculateDamage(shooter.Weapon, hitType, playerDistance*playerDistance)
-			if s.damagePlayer(closestPlayer.ID, damage, eyePos, 1) {
+			if s.damagePlayer(closestPlayer.ID, damage, eyePos, protocol.HurtTypeWeapon) {
 				killType := protocol.KillTypeWeapon
 				if hitType == protocol.HitTypeHead {
 					killType = protocol.KillTypeHeadshot
@@ -1323,7 +1323,7 @@ func (s *Server) validateWeaponState(p *player.Player, hitType protocol.HitType)
 	return true
 }
 
-func (s *Server) validateWeaponRange(p *player.Player, weapon protocol.WeaponType, pos, targetPos protocol.Vector3f, distance float32) bool {
+func (s *Server) validateWeaponRange(p *player.Player, targetName string, weapon protocol.WeaponType, pos, targetPos protocol.Vector3f, distance float32) bool {
 	maxWeaponRange := float32(128.0)
 	if weapon == protocol.WeaponTypeShotgun {
 		maxWeaponRange = 64.0
@@ -1366,7 +1366,7 @@ func (s *Server) validateWeaponRange(p *player.Player, weapon protocol.WeaponTyp
 	if hit {
 		s.logger.Debug("hit blocked by terrain",
 			"player", p.GetName(),
-			"target", p.GetName())
+			"target", targetName)
 		return false
 	}
 
@@ -1405,7 +1405,7 @@ func (s *Server) handleHit(p *player.Player, data []byte) {
 	p.RUnlock()
 
 	if packet.HitType != protocol.HitTypeMelee {
-		if !s.validateWeaponRange(p, weapon, pos, targetPos, distance) {
+		if !s.validateWeaponRange(p, target.GetName(), weapon, pos, targetPos, distance) {
 			return
 		}
 	}
@@ -1417,10 +1417,12 @@ func (s *Server) handleHit(p *player.Player, data []byte) {
 		return
 	}
 
-	if s.damagePlayer(target.ID, damage, pos, 1) {
+	if s.damagePlayer(target.ID, damage, pos, protocol.HurtTypeWeapon) {
 		killType := protocol.KillTypeWeapon
 		if packet.HitType == protocol.HitTypeHead {
 			killType = protocol.KillTypeHeadshot
+		} else if packet.HitType == protocol.HitTypeMelee {
+			killType = protocol.KillTypeMelee
 		}
 		s.handlePlayerKill(p, target, killType)
 	}
@@ -1888,21 +1890,7 @@ func (s *Server) handleVersionResponse(p *player.Player, data []byte) {
 		"revision", packet.VersionRevision,
 		"os", packet.OSInfo)
 
-	supportsExtensions := false
-	if packet.ClientIdentifier == 'o' {
-		if packet.VersionMajor > 0 || (packet.VersionMajor == 0 && packet.VersionMinor > 1) ||
-			(packet.VersionMajor == 0 && packet.VersionMinor == 1 && packet.VersionRevision > 3) {
-			supportsExtensions = true
-		}
-	} else if packet.ClientIdentifier == 'B' {
-		supportsExtensions = true
-	}
-
-	if supportsExtensions {
-		s.sendExtensionInfo(p)
-	} else {
-		s.logger.Debug("client does not support extensions", "player", p.ID, "client", identifier)
-	}
+	s.sendExtensionInfo(p)
 }
 
 func (s *Server) handleExtensionInfo(p *player.Player, data []byte) {
@@ -2200,17 +2188,18 @@ func (s *Server) respawnPlayer(playerID uint8) {
 	s.sendPlayerProperties(p)
 }
 
-func (s *Server) damagePlayer(playerID uint8, damage uint8, source protocol.Vector3f, damageType uint8) bool {
+func (s *Server) damagePlayer(playerID uint8, damage uint8, source protocol.Vector3f, damageType protocol.HurtType) bool {
 	p, ok := s.gameState.Players.Get(playerID)
 	if !ok {
 		return false
 	}
 
-	p.Damage(damage, source, damageType)
+	p.Damage(damage, source, uint8(damageType))
 	s.callbacks.OnPlayerDamage(p, damage, source)
 
 	killed := false
 	p.RLock()
+	currentHP := p.HP
 	if p.HP == 0 {
 		killed = true
 	}
@@ -2218,7 +2207,7 @@ func (s *Server) damagePlayer(playerID uint8, damage uint8, source protocol.Vect
 
 	hpPacket := protocol.PacketSetHP{
 		PacketID: uint8(protocol.PacketTypeSetHP),
-		HP:       p.HP,
+		HP:       currentHP,
 		Type:     damageType,
 		SourceX:  source.X,
 		SourceY:  source.Y,
@@ -2255,7 +2244,7 @@ func (s *Server) broadcastKillAction(victimID, killerID uint8, killType protocol
 		PlayerID:    victimID,
 		KillerID:    killerID,
 		KillType:    killType,
-		RespawnTime: uint8(s.config.Server.RespawnTime),
+		RespawnTime: uint8(s.config.Server.RespawnTime) + 1,
 	}
 	s.broadcastPacket(&packet, true)
 }
@@ -2503,7 +2492,7 @@ func (s *Server) explodeGrenade(grenade *gamestate.Grenade) {
 
 		distanceSquared := float32(dx*dx + dy*dy + dz*dz)
 		if distanceSquared < 1e-6 {
-			if s.damagePlayer(p.ID, 100, grenade.Position, 1) {
+			if s.damagePlayer(p.ID, 100, grenade.Position, protocol.HurtTypeWeapon) {
 				if killer, ok := s.gameState.Players.Get(grenade.PlayerID); ok {
 					s.handlePlayerKill(killer, p, protocol.KillTypeGrenade)
 				} else {
@@ -2522,7 +2511,7 @@ func (s *Server) explodeGrenade(grenade *gamestate.Grenade) {
 			damage = 100.0
 		}
 
-		if s.damagePlayer(p.ID, uint8(damage), grenade.Position, 1) {
+		if s.damagePlayer(p.ID, uint8(damage), grenade.Position, protocol.HurtTypeWeapon) {
 			if killer, ok := s.gameState.Players.Get(grenade.PlayerID); ok {
 				s.handlePlayerKill(killer, p, protocol.KillTypeGrenade)
 			} else {
@@ -2793,7 +2782,7 @@ func (s *Server) checkWaterDamage(p *player.Player) {
 	if pos.Z >= waterLevel {
 		now := time.Now()
 		if now.Sub(p.LastWaterDamage) >= time.Second {
-			if s.damagePlayer(p.ID, uint8(waterDamage), pos, 0) {
+			if s.damagePlayer(p.ID, uint8(waterDamage), pos, protocol.HurtTypeFall) {
 				s.handleEnvironmentKill(p, protocol.KillTypeFall)
 			}
 			p.LastWaterDamage = now
@@ -2820,7 +2809,7 @@ func (s *Server) checkBoundaryDamage(p *player.Player) {
 	if outOfBounds {
 		now := time.Now()
 		if now.Sub(p.LastBoundaryDamage) >= time.Second {
-			if s.damagePlayer(p.ID, uint8(boundary.Damage), pos, 0) {
+			if s.damagePlayer(p.ID, uint8(boundary.Damage), pos, protocol.HurtTypeFall) {
 				s.handleEnvironmentKill(p, protocol.KillTypeFall)
 			}
 			p.LastBoundaryDamage = now
@@ -2858,12 +2847,11 @@ func (s *Server) checkIntelPickup(p *player.Player) {
 	}
 
 	pos := p.GetPosition()
-	dx := pos.X - intelPos.X
-	dy := pos.Y - intelPos.Y
-	dz := pos.Z - intelPos.Z
-	distSquared := dx*dx + dy*dy + dz*dz
+	dx := math.Abs(float64(pos.X - intelPos.X))
+	dy := math.Abs(float64(pos.Y - intelPos.Y))
+	dz := math.Abs(float64(pos.Z - intelPos.Z))
 
-	if distSquared <= 1.5*1.5 {
+	if dx < 3.0 && dy < 3.0 && dz < 3.0 {
 		if s.gameMode.OnIntelPickup(p, intelTeam) {
 			if s.gameState.PickupIntel(p.ID, p.Team) {
 				packet := protocol.PacketIntelPickup{
@@ -2931,10 +2919,6 @@ func (s *Server) checkCTFIntelCapture(p *player.Player, pos protocol.Vector3f) {
 		return
 	}
 
-	if !s.gameState.IsIntelAtBase(p.Team) {
-		return
-	}
-
 	if s.gameMode.OnIntelCapture(p, p.Team) {
 		if s.gameState.CaptureIntel(p.ID, p.Team) {
 			s.handleCaptureSuccess(p)
@@ -2965,7 +2949,7 @@ func (s *Server) checkIntelCapture(p *player.Player) {
 }
 
 func (s *Server) checkRestock(p *player.Player) {
-	const restockCooldown = 15 * time.Second
+	const restockCooldown = 20 * time.Second
 	const restockRadius = 3.0
 
 	if p.Team > 1 {
@@ -3025,6 +3009,10 @@ func (s *Server) sendPlayerProperties(p *player.Player) {
 }
 
 func (s *Server) handleCaptureSuccess(p *player.Player) {
+	p.Lock()
+	p.Kills += 10
+	p.Unlock()
+
 	won, winningTeam := s.gameMode.CheckWinCondition()
 	winning := uint8(0)
 	if won {

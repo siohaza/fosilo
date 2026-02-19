@@ -1,7 +1,6 @@
 package mapmeta
 
 import (
-	"fmt"
 	"strings"
 )
 
@@ -67,10 +66,6 @@ func Parse(content []byte) (*Metadata, error) {
 	}
 
 	meta := buildMetadata(env)
-	if meta.Metadata.Name == "" {
-		return nil, fmt.Errorf("no name found")
-	}
-
 	return meta, nil
 }
 

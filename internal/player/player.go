@@ -73,6 +73,7 @@ type Player struct {
 	LastUpdatedPositionClock uint64
 
 	Permissions         uint64
+	LoginRetries        int
 	Muted               bool
 	Invisible           bool
 	Client              byte

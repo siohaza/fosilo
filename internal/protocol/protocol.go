@@ -109,6 +109,13 @@ const (
 	KillTypeClassChange KillType = 6
 )
 
+type HurtType uint8
+
+const (
+	HurtTypeFall   HurtType = 0
+	HurtTypeWeapon HurtType = 1
+)
+
 type ChatType uint8
 
 const (
@@ -223,7 +230,7 @@ type PacketHit struct {
 type PacketSetHP struct {
 	PacketID uint8
 	HP       uint8
-	Type     uint8
+	Type     HurtType
 	SourceX  float32
 	SourceY  float32
 	SourceZ  float32
@@ -418,8 +425,8 @@ type PacketRestock struct {
 
 type PacketFogColor struct {
 	PacketID uint8
-	A        uint8
 	Color    Color3b
+	A        uint8
 }
 
 type PacketWeaponReload struct {
@@ -634,22 +641,14 @@ func (p *PacketStateData) Write(w io.Writer) error {
 	buf.WriteByte(uint8(p.Gamemode))
 
 	if p.Gamemode == GamemodeTypeCTF {
-		team1HasEnemyIntel := (p.CTFState.HeldIntels & 2) != 0
-		team2HasEnemyIntel := (p.CTFState.HeldIntels & 1) != 0
+		team1IntelHeld := (p.CTFState.HeldIntels & 1) != 0
+		team2IntelHeld := (p.CTFState.HeldIntels & 2) != 0
 
 		var err error
 		buf.WriteByte(p.CTFState.Team1Score)
 		buf.WriteByte(p.CTFState.Team2Score)
 		buf.WriteByte(p.CTFState.CaptureLimit)
-
-		intelFlags := uint8(0)
-		if team1HasEnemyIntel {
-			intelFlags |= 1
-		}
-		if team2HasEnemyIntel {
-			intelFlags |= 2
-		}
-		buf.WriteByte(intelFlags)
+		buf.WriteByte(p.CTFState.HeldIntels)
 
 		writeFloat := func(value float32) {
 			if err != nil {
@@ -658,9 +657,8 @@ func (p *PacketStateData) Write(w io.Writer) error {
 			err = binary.Write(&buf, binary.LittleEndian, value)
 		}
 
-		if team2HasEnemyIntel {
-			carrier := p.CTFState.CarrierIDs[0]
-			buf.WriteByte(carrier)
+		if team1IntelHeld {
+			buf.WriteByte(p.CTFState.CarrierIDs[0])
 			buf.Write(make([]byte, 11))
 		} else {
 			writeFloat(p.CTFState.Team1Intel.X)
@@ -668,9 +666,8 @@ func (p *PacketStateData) Write(w io.Writer) error {
 			writeFloat(p.CTFState.Team1Intel.Z)
 		}
 
-		if team1HasEnemyIntel {
-			carrier := p.CTFState.CarrierIDs[1]
-			buf.WriteByte(carrier)
+		if team2IntelHeld {
+			buf.WriteByte(p.CTFState.CarrierIDs[1])
 			buf.Write(make([]byte, 11))
 		} else {
 			writeFloat(p.CTFState.Team2Intel.X)
