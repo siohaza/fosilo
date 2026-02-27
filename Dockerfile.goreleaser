@@ -1,0 +1,44 @@
+ARG GO_RELEASER_CROSS_VERSION=v1.25.7
+FROM goreleaser/goreleaser-cross:${GO_RELEASER_CROSS_VERSION}
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    autoconf libtool pkg-config \
+    && rm -rf /var/lib/apt/lists/*
+
+ARG ENET_VERSION=v1.3.18
+RUN git clone --branch ${ENET_VERSION} --depth 1 \
+    https://github.com/lsalzman/enet.git /tmp/enet
+
+RUN cd /tmp/enet && autoreconf -vfi \
+    && ./configure --host=x86_64-linux-gnu \
+       --prefix=/usr/local/x86_64-linux-gnu \
+       --enable-static --disable-shared \
+       CC=x86_64-linux-gnu-gcc \
+    && make -j$(nproc) && make install \
+    && make clean
+
+RUN cd /tmp/enet \
+    && ./configure --host=aarch64-linux-gnu \
+       --prefix=/usr/local/aarch64-linux-gnu \
+       --enable-static --disable-shared \
+       CC=aarch64-linux-gnu-gcc \
+    && make -j$(nproc) && make install \
+    && make clean
+
+RUN cd /tmp/enet \
+    && ./configure --host=x86_64-w64-mingw32 \
+       --prefix=/usr/local/x86_64-w64-mingw32 \
+       --enable-static --disable-shared \
+       CC=x86_64-w64-mingw32-gcc \
+    && make -j$(nproc) && make install \
+    && make clean
+
+RUN rm -rf /tmp/enet
+
+# Tell we got amd64 and arm64 versions of ENet
+RUN mkdir -p /usr/local/x86_64-linux-gnu/lib/pkgconfig \
+    && printf 'prefix=/usr/local/x86_64-linux-gnu\nlibdir=${prefix}/lib\nincludedir=${prefix}/include\n\nName: libenet\nDescription: ENet reliable UDP library\nVersion: 1.3.18\nLibs: -L${libdir} -lenet\nCflags: -I${includedir}\n' \
+       > /usr/local/x86_64-linux-gnu/lib/pkgconfig/libenet.pc \
+    && mkdir -p /usr/local/aarch64-linux-gnu/lib/pkgconfig \
+    && printf 'prefix=/usr/local/aarch64-linux-gnu\nlibdir=${prefix}/lib\nincludedir=${prefix}/include\n\nName: libenet\nDescription: ENet reliable UDP library\nVersion: 1.3.18\nLibs: -L${libdir} -lenet\nCflags: -I${includedir}\n' \
+       > /usr/local/aarch64-linux-gnu/lib/pkgconfig/libenet.pc \

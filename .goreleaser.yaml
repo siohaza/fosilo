@@ -1,0 +1,177 @@
+version: 2
+
+before:
+  hooks:
+    - go mod tidy
+    - go mod download
+    # Use our own ENet built via gcc instead of msvc
+    - >-
+      sh -c "ENET_VER=$(go list -m -f '{{ "{{" }}.Version{{ "}}" }}' github.com/codecat/go-enet) &&
+      rm -f $(go env GOMODCACHE)/github.com/codecat/go-enet@${ENET_VER}/enet/enet.lib"
+
+builds:
+  # Linux amd64
+  - id: fosilo-linux-amd64
+    main: ./cmd/fosilo
+    binary: fosilo
+    goos:
+      - linux
+    goarch:
+      - amd64
+    env:
+      - CGO_ENABLED=1
+      - CC=x86_64-linux-gnu-gcc
+      - PKG_CONFIG_PATH=/usr/local/x86_64-linux-gnu/lib/pkgconfig
+    ldflags:
+      - -s -w -X main.version={{.Version}}
+    flags:
+      - -trimpath
+
+  - id: mapconvert-linux-amd64
+    main: ./cmd/mapconvert
+    binary: mapconvert
+    goos:
+      - linux
+    goarch:
+      - amd64
+    env:
+      - CGO_ENABLED=1
+      - CC=x86_64-linux-gnu-gcc
+      - PKG_CONFIG_PATH=/usr/local/x86_64-linux-gnu/lib/pkgconfig
+    ldflags:
+      - -s -w
+    flags:
+      - -trimpath
+
+  # Linux arm64
+  - id: fosilo-linux-arm64
+    main: ./cmd/fosilo
+    binary: fosilo
+    goos:
+      - linux
+    goarch:
+      - arm64
+    env:
+      - CGO_ENABLED=1
+      - CC=aarch64-linux-gnu-gcc
+      - PKG_CONFIG_PATH=/usr/local/aarch64-linux-gnu/lib/pkgconfig
+    ldflags:
+      - -s -w -X main.version={{.Version}}
+    flags:
+      - -trimpath
+
+  - id: mapconvert-linux-arm64
+    main: ./cmd/mapconvert
+    binary: mapconvert
+    goos:
+      - linux
+    goarch:
+      - arm64
+    env:
+      - CGO_ENABLED=1
+      - CC=aarch64-linux-gnu-gcc
+      - PKG_CONFIG_PATH=/usr/local/aarch64-linux-gnu/lib/pkgconfig
+    ldflags:
+      - -s -w
+    flags:
+      - -trimpath
+
+  # Windows amd64
+  - id: fosilo-windows-amd64
+    main: ./cmd/fosilo
+    binary: fosilo
+    goos:
+      - windows
+    goarch:
+      - amd64
+    env:
+      - CGO_ENABLED=1
+      - CC=x86_64-w64-mingw32-gcc
+      - CGO_CFLAGS=-I/usr/local/x86_64-w64-mingw32/include
+      - CGO_LDFLAGS=-L/usr/local/x86_64-w64-mingw32/lib
+    ldflags:
+      - -s -w -X main.version={{.Version}}
+    flags:
+      - -trimpath
+
+  - id: mapconvert-windows-amd64
+    main: ./cmd/mapconvert
+    binary: mapconvert
+    goos:
+      - windows
+    goarch:
+      - amd64
+    env:
+      - CGO_ENABLED=1
+      - CC=x86_64-w64-mingw32-gcc
+      - CGO_CFLAGS=-I/usr/local/x86_64-w64-mingw32/include
+      - CGO_LDFLAGS=-L/usr/local/x86_64-w64-mingw32/lib
+    ldflags:
+      - -s -w
+    flags:
+      - -trimpath
+
+archives:
+  - id: linux-amd64
+    ids:
+      - fosilo-linux-amd64
+      - mapconvert-linux-amd64
+    formats: [tar.gz]
+    wrap_in_directory: true
+    name_template: "{{ .ProjectName }}_{{ .Version }}_linux_amd64"
+    files:
+      - src: config/*
+        dst: config
+      - src: maps/*
+        dst: maps
+      - src: scripts/**/*
+        dst: scripts
+      - LICENSE
+      - README.md
+
+  - id: linux-arm64
+    ids:
+      - fosilo-linux-arm64
+      - mapconvert-linux-arm64
+    formats: [tar.gz]
+    wrap_in_directory: true
+    name_template: "{{ .ProjectName }}_{{ .Version }}_linux_arm64"
+    files:
+      - src: config/*
+        dst: config
+      - src: maps/*
+        dst: maps
+      - src: scripts/**/*
+        dst: scripts
+      - LICENSE
+      - README.md
+
+  - id: windows-amd64
+    ids:
+      - fosilo-windows-amd64
+      - mapconvert-windows-amd64
+    formats: [zip]
+    wrap_in_directory: true
+    name_template: "{{ .ProjectName }}_{{ .Version }}_windows_amd64"
+    files:
+      - src: config/*
+        dst: config
+      - src: maps/*
+        dst: maps
+      - src: scripts/**/*
+        dst: scripts
+      - LICENSE
+      - README.md
+
+checksum:
+  name_template: "checksums.txt"
+
+release:
+  draft: true
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
