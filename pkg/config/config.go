@@ -63,6 +63,18 @@ type ServerConfig struct {
 	TCMaxScore        int     `toml:"tc_max_score"`
 	TCCaptureDistance float64 `toml:"tc_capture_distance"`
 	TCCaptureRate     float64 `toml:"tc_capture_rate"`
+
+	// laby specific
+	LabyCapLimit   int     `toml:"laby_cap_limit"`
+	LabyHogTimeout int     `toml:"laby_hog_timeout"`
+	LabyRegenRate  float64 `toml:"laby_regen_rate"`
+
+	// vxlgen tower metadata which is set dynamically after generation
+	TowerPosX   int `toml:"-"`
+	TowerPosY   int `toml:"-"`
+	TowerCellsX int `toml:"-"`
+	TowerCellsY int `toml:"-"`
+	TowerCellsZ int `toml:"-"`
 }
 
 type TeamsConfig struct {
@@ -110,6 +122,7 @@ type GamemodeConfig struct {
 	TDM   *TDMConfig   `toml:"tdm"`
 	Babel *BabelConfig `toml:"babel"`
 	Arena *ArenaConfig `toml:"arena"`
+	Laby  *LabyConfig  `toml:"laby"`
 }
 
 type CTFConfig struct {
@@ -143,6 +156,12 @@ type ArenaConfig struct {
 	ScoreLimit         *int  `toml:"score_limit"`
 	TimeoutIsDraw      *bool `toml:"timeout_is_draw"`
 	SuddenDeathEnabled *bool `toml:"sudden_death_enabled"`
+}
+
+type LabyConfig struct {
+	CapLimit   *int     `toml:"cap_limit"`
+	HogTimeout *int     `toml:"hog_timeout"`
+	RegenRate  *float64 `toml:"regen_rate"`
 }
 
 type MapConfig struct {
@@ -547,6 +566,19 @@ func LoadConfig(path string) (*Config, error) {
 		}
 	}
 
+	// laby defaults
+	if config.Server.Gamemode == 5 {
+		if config.Server.LabyCapLimit == 0 {
+			config.Server.LabyCapLimit = 1
+		}
+		if config.Server.LabyHogTimeout == 0 {
+			config.Server.LabyHogTimeout = 180
+		}
+		if config.Server.LabyRegenRate == 0 {
+			config.Server.LabyRegenRate = 1.0
+		}
+	}
+
 	if config.Server.Master && len(config.Server.MasterHosts) == 0 {
 		config.Server.MasterHosts = []MasterHost{
 			{Host: "master.buildandshoot.com", Port: 32886},
@@ -650,6 +682,18 @@ func (c *Config) applyGamemodeOverrides() {
 		}
 		if c.Gamemode.Arena.SuddenDeathEnabled != nil {
 			c.Server.ArenaSuddenDeath = *c.Gamemode.Arena.SuddenDeathEnabled
+		}
+	}
+
+	if c.Gamemode.Laby != nil {
+		if c.Gamemode.Laby.CapLimit != nil {
+			c.Server.LabyCapLimit = *c.Gamemode.Laby.CapLimit
+		}
+		if c.Gamemode.Laby.HogTimeout != nil {
+			c.Server.LabyHogTimeout = *c.Gamemode.Laby.HogTimeout
+		}
+		if c.Gamemode.Laby.RegenRate != nil {
+			c.Server.LabyRegenRate = *c.Gamemode.Laby.RegenRate
 		}
 	}
 
@@ -937,6 +981,7 @@ const (
 	GamemodeBabel GamemodeID = 2
 	GamemodeTDM   GamemodeID = 3
 	GamemodeArena GamemodeID = 4
+	GamemodeLaby  GamemodeID = 5
 )
 
 func (g GamemodeID) String() string {
@@ -951,6 +996,8 @@ func (g GamemodeID) String() string {
 		return "tdm"
 	case GamemodeArena:
 		return "arena"
+	case GamemodeLaby:
+		return "laby"
 	default:
 		return "unknown"
 	}
@@ -968,6 +1015,8 @@ func ParseGamemode(id int) (GamemodeID, error) {
 		return GamemodeTDM, nil
 	case 4:
 		return GamemodeArena, nil
+	case 5:
+		return GamemodeLaby, nil
 	default:
 		return 0, fmt.Errorf("invalid gamemode ID: %d", id)
 	}

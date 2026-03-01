@@ -43,6 +43,7 @@ type ServerInterface interface {
 	BroadcastProgressBar(entityID, capturingTeam uint8, rate int8, progress float32)
 	SendPlayerPositionPacketTo(playerID uint8, pos, ori protocol.Vector3f, toPlayerID uint8)
 	SendIntelPositionPacketOnly(objectID uint8, team uint8, position protocol.Vector3f)
+	BroadcastCreatePlayer(p *player.Player)
 }
 
 type GameAPI struct {
@@ -457,6 +458,10 @@ func (api *GameAPI) setPlayerPosition(state *lua.State) int {
 		p.EyePos = protocol.Vector3f{X: x, Y: y, Z: z}
 		p.Velocity = protocol.Vector3f{X: 0, Y: 0, Z: 0}
 		p.Unlock()
+
+		if api.server != nil {
+			api.server.BroadcastCreatePlayer(p)
+		}
 	}
 
 	return 0
@@ -1873,6 +1878,22 @@ func (api *GameAPI) getConfigValue(state *lua.State) int {
 		state.PushNumber(cfg.TCCaptureDistance)
 	case "tc_capture_rate":
 		state.PushNumber(cfg.TCCaptureRate)
+	case "laby_cap_limit":
+		state.PushInteger(cfg.LabyCapLimit)
+	case "laby_hog_timeout":
+		state.PushInteger(cfg.LabyHogTimeout)
+	case "laby_regen_rate":
+		state.PushNumber(cfg.LabyRegenRate)
+	case "tower_pos_x":
+		state.PushInteger(cfg.TowerPosX)
+	case "tower_pos_y":
+		state.PushInteger(cfg.TowerPosY)
+	case "tower_cells_x":
+		state.PushInteger(cfg.TowerCellsX)
+	case "tower_cells_y":
+		state.PushInteger(cfg.TowerCellsY)
+	case "tower_cells_z":
+		state.PushInteger(cfg.TowerCellsZ)
 	default:
 		state.PushNil()
 	}

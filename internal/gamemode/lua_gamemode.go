@@ -370,6 +370,23 @@ func (gm *LuaGameMode) OnGrenadeToss(p *player.Player) {
 	}
 }
 
+func (gm *LuaGameMode) OnGrenadeExplode(thrower *player.Player, x, y, z float32) {
+	if !gm.vm.HasFunction("on_grenade_explode") {
+		return
+	}
+
+	gm.vm.State().Global("on_grenade_explode")
+	lua.PushPlayer(gm.vm.State(), thrower)
+	gm.vm.State().PushNumber(float64(x))
+	gm.vm.State().PushNumber(float64(y))
+	gm.vm.State().PushNumber(float64(z))
+	if err := gm.vm.State().ProtectedCall(4, 0, 0); err != nil {
+		if gm.logger != nil {
+			gm.logger.Error("lua gamemode on_grenade_explode error", "error", err)
+		}
+	}
+}
+
 func (gm *LuaGameMode) OnRestock(p *player.Player) {
 	if !gm.vm.HasFunction("on_restock") {
 		return

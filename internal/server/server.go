@@ -30,6 +30,7 @@ import (
 	"github.com/siohaza/fosilo/pkg/config"
 	"github.com/siohaza/fosilo/pkg/lua"
 	"github.com/siohaza/fosilo/pkg/vxl"
+	"github.com/siohaza/fosilo/pkg/vxlgen"
 
 	"github.com/codecat/go-enet"
 )
@@ -147,6 +148,7 @@ func (s *Server) Start() error {
 		return fmt.Errorf("failed to load Lua gamemode: %w", err)
 	}
 	s.gameMode = luaMode
+	s.callbacks.Register(luaMode)
 	s.logger.Info("loaded Lua game mode", "path", luaGamemodePath, "mode", s.gameMode.Name())
 
 	if s.luaCommands != nil {
@@ -395,6 +397,47 @@ func (s *Server) prepareMapResources(mapSpec string) (*vxl.Map, *config.MapConfi
 		return vxlMap, mapCfg, display, "classicgen", nil
 	}
 
+	if strings.EqualFold(base, "vxlgen") {
+		seed, display := s.resolveVxlgenSeed(param)
+		result := vxlgen.Generate(vxlgen.Config{Seed: seed})
+		vxlMap := result.Map
+
+		mapCfg := config.DefaultMapConfig()
+		mapCfg.Map.Author = "VxlGen"
+		mapCfg.Map.Description = fmt.Sprintf("Procedurally generated labyrinth (seed %d)", seed)
+
+		blueZ := 63 - result.BlueSpawnArea.Max.Z
+		greenZ := 63 - result.GreenSpawnArea.Max.Z
+
+		mapCfg.Tents.Team1 = config.TentArea{
+			Start: [3]int{result.BlueSpawnArea.Min.X, result.BlueSpawnArea.Min.Y, max(0, blueZ-5)},
+			End:   [3]int{result.BlueSpawnArea.Max.X, result.BlueSpawnArea.Max.Y, min(63, blueZ+10)},
+		}
+		mapCfg.Tents.Team2 = config.TentArea{
+			Start: [3]int{result.GreenSpawnArea.Min.X, result.GreenSpawnArea.Min.Y, max(0, greenZ-5)},
+			End:   [3]int{result.GreenSpawnArea.Max.X, result.GreenSpawnArea.Max.Y, min(63, greenZ+10)},
+		}
+
+		mapCfg.SpawnPoints.Team1 = config.SpawnArea{
+			Start: [3]int{result.BlueSpawnArea.Min.X, result.BlueSpawnArea.Min.Y, max(0, blueZ-5)},
+			End:   [3]int{result.BlueSpawnArea.Max.X, result.BlueSpawnArea.Max.Y, min(63, blueZ+10)},
+		}
+		mapCfg.SpawnPoints.Team2 = config.SpawnArea{
+			Start: [3]int{result.GreenSpawnArea.Min.X, result.GreenSpawnArea.Min.Y, max(0, greenZ-5)},
+			End:   [3]int{result.GreenSpawnArea.Max.X, result.GreenSpawnArea.Max.Y, min(63, greenZ+10)},
+		}
+
+		setVxlgenIntelPositions(vxlMap, mapCfg, result)
+
+		s.config.Server.TowerPosX = result.TowerPos.X
+		s.config.Server.TowerPosY = result.TowerPos.Y
+		s.config.Server.TowerCellsX = result.NumCells.X
+		s.config.Server.TowerCellsY = result.NumCells.Y
+		s.config.Server.TowerCellsZ = result.NumCells.Z
+
+		return vxlMap, mapCfg, display, "vxlgen", nil
+	}
+
 	mapPath := fmt.Sprintf("maps/%s.vxl", mapSpec)
 
 	mapData, err := os.ReadFile(mapPath)
@@ -449,8 +492,9 @@ func setClassicgenIntelPositions(vxlMap *vxl.Map, mapCfg *config.MapConfig) {
 
 	placeTent := func(area config.TentArea) tentPlacement {
 		x, y, top, slope := findTentPlacement(vxlMap, area)
-		flattenTentArea(vxlMap, x, y, top)
+		flattenTentArea(vxlMap, x, y, top+1)
 
+		top = vxlMap.FindTopBlock(x, y)
 		baseHeight := clampInt(top, 1, vxlMap.Depth()-2)
 		heightOffset := 1 + min(slope, 2)
 
@@ -610,7 +654,8 @@ func flattenTentArea(vxlMap *vxl.Map, centerX, centerY, centerZ int) {
 	depth := vxlMap.Depth()
 
 	targetHeight := clampInt(centerZ, 1, depth-2)
-	radius := 4
+	radius := 6
+	innerRadius := 3
 
 	for dx := -radius; dx <= radius; dx++ {
 		for dy := -radius; dy <= radius; dy++ {
@@ -621,27 +666,32 @@ func flattenTentArea(vxlMap *vxl.Map, centerX, centerY, centerZ int) {
 			cx := clampInt(centerX+dx, 0, width-1)
 			cy := clampInt(centerY+dy, 0, height-1)
 
+			currentTop := vxlMap.FindTopBlock(cx, cy)
 			distance := abs(dx) + abs(dy)
+
 			desiredHeight := targetHeight
-			if distance >= radius-1 {
-				desiredHeight = max(targetHeight-1, 1)
+			if distance > innerRadius {
+				steps := distance - innerRadius
+				if currentTop > targetHeight {
+					desiredHeight = min(targetHeight+steps, currentTop)
+				} else if currentTop < targetHeight {
+					desiredHeight = max(targetHeight-steps, currentTop)
+				}
 			}
 			desiredHeight = clampInt(desiredHeight, 1, depth-2)
 
-			currentTop := vxlMap.FindTopBlock(cx, cy)
-			if currentTop > desiredHeight {
-				for z := desiredHeight + 1; z <= currentTop; z++ {
+			if currentTop < desiredHeight {
+				for z := currentTop; z < desiredHeight; z++ {
 					vxlMap.SetAir(cx, cy, z)
 				}
-			} else if currentTop < desiredHeight {
+			} else if currentTop > desiredHeight {
 				color := fallbackTerrainColor
 				if currentTop >= 0 {
 					if c := vxlMap.Get(cx, cy, currentTop); c != 0 {
 						color = c
 					}
 				}
-				start := max(currentTop+1, 0)
-				for z := start; z <= desiredHeight; z++ {
+				for z := desiredHeight; z < currentTop; z++ {
 					vxlMap.Set(cx, cy, z, color)
 				}
 			}
@@ -672,6 +722,52 @@ func (s *Server) resolveClassicgenSeed(seedHint string) (uint32, string) {
 	}
 	displayName := fmt.Sprintf("classicgen (seed: %d)", seed)
 	return seed, displayName
+}
+
+func (s *Server) resolveVxlgenSeed(seedHint string) (uint64, string) {
+	var seed uint64
+	if seedHint != "" {
+		if v, err := strconv.ParseUint(seedHint, 0, 64); err == nil {
+			seed = v
+		} else {
+			seed = uint64(crc32.ChecksumIEEE([]byte(seedHint)))
+		}
+	}
+	if seed == 0 {
+		seed = uint64(time.Now().UnixNano())
+	}
+	displayName := fmt.Sprintf("vxlgen (seed: %d)", seed)
+	return seed, displayName
+}
+
+func setVxlgenIntelPositions(vxlMap *vxl.Map, mapCfg *config.MapConfig, result *vxlgen.Result) {
+	if vxlMap == nil || mapCfg == nil {
+		return
+	}
+
+	placeIntel := func(area vxlgen.Box3i) tentPlacement {
+		cx := (area.Min.X + area.Max.X) / 2
+		cy := (area.Min.Y + area.Max.Y) / 2
+		gz := 63 - (area.Min.Z+area.Max.Z)/2
+		return tentPlacement{
+			intel: [3]float64{float64(cx) + 0.5, float64(cy) + 0.5, float64(gz) + 2.0},
+			base:  [3]float64{float64(cx) + 0.5, float64(cy) + 0.5, float64(gz)},
+			x:     cx,
+			y:     cy,
+			z:     gz,
+		}
+	}
+
+	team1 := placeIntel(result.BlueSpawnArea)
+	team2 := placeIntel(result.GreenSpawnArea)
+
+	mapCfg.Intel.Team1Position = team1.intel
+	mapCfg.Intel.Team1Base = team1.base
+	mapCfg.Intel.Team2Position = team2.intel
+	mapCfg.Intel.Team2Base = team2.base
+
+	mapCfg.SpawnPoints.Team1Points = team1.spawnPoints(vxlMap)
+	mapCfg.SpawnPoints.Team2Points = team2.spawnPoints(vxlMap)
 }
 
 func (s *Server) run() {
@@ -2162,18 +2258,9 @@ func (s *Server) respawnPlayer(playerID uint8) {
 	s.gameMode.OnPlayerSpawn(p)
 	s.callbacks.OnPlayerSpawn(p)
 
-	p.RLock()
-	packet := protocol.PacketCreatePlayer{
-		PacketID: uint8(protocol.PacketTypeCreatePlayer),
-		PlayerID: p.ID,
-		Weapon:   p.Weapon,
-		Team:     toNetworkTeamID(p.Team),
-		X:        spawnPos.X,
-		Y:        spawnPos.Y,
-		Z:        spawnPos.Z,
-	}
-	copy(packet.Name[:], p.Name)
+	s.BroadcastCreatePlayer(p)
 
+	p.RLock()
 	reloadPacket := protocol.PacketWeaponReload{
 		PacketID:     uint8(protocol.PacketTypeWeaponReload),
 		PlayerID:     p.ID,
@@ -2182,10 +2269,27 @@ func (s *Server) respawnPlayer(playerID uint8) {
 	}
 	p.RUnlock()
 
-	s.broadcastPacket(&packet, true)
 	s.sendPacket(p, &reloadPacket, true)
 	s.broadcastShortPlayerData(p)
 	s.sendPlayerProperties(p)
+}
+
+func (s *Server) BroadcastCreatePlayer(p *player.Player) {
+	p.RLock()
+	pos := p.Position
+	packet := protocol.PacketCreatePlayer{
+		PacketID: uint8(protocol.PacketTypeCreatePlayer),
+		PlayerID: p.ID,
+		Weapon:   p.Weapon,
+		Team:     toNetworkTeamID(p.Team),
+		X:        pos.X,
+		Y:        pos.Y,
+		Z:        pos.Z,
+	}
+	copy(packet.Name[:], p.Name)
+	p.RUnlock()
+
+	s.broadcastPacket(&packet, true)
 }
 
 func (s *Server) damagePlayer(playerID uint8, damage uint8, source protocol.Vector3f, damageType protocol.HurtType) bool {
@@ -2536,6 +2640,10 @@ func (s *Server) explodeGrenade(grenade *gamestate.Grenade) {
 			Z:        block.Z,
 		}
 		s.broadcastPacket(&blockPacket, true)
+	}
+
+	if thrower, ok := s.gameState.Players.Get(grenade.PlayerID); ok {
+		s.callbacks.OnGrenadeExplode(thrower, grenade.Position.X, grenade.Position.Y, grenade.Position.Z)
 	}
 }
 

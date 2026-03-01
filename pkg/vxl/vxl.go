@@ -572,7 +572,7 @@ func (m *Map) writeColumn(x, y int, w io.Writer) error {
 		}
 
 		topStart := uint8(k)
-		for k < m.depth && m.OnSurface(x, y, k) {
+		for k < m.depth && m.IsSolid(x, y, k) && m.OnSurface(x, y, k) {
 			k++
 		}
 		topEnd := uint8(k)
@@ -583,11 +583,11 @@ func (m *Map) writeColumn(x, y int, w io.Writer) error {
 
 		z := k
 		bottomStart := uint8(k)
-		for z < m.depth && m.OnSurface(x, y, z) {
+		for z < m.depth && m.IsSolid(x, y, z) && m.OnSurface(x, y, z) {
 			z++
 		}
 		if z != m.depth {
-			for k < m.depth && m.OnSurface(x, y, k) {
+			for k < m.depth && m.IsSolid(x, y, k) && m.OnSurface(x, y, k) {
 				k++
 			}
 		}

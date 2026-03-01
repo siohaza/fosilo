@@ -20,6 +20,7 @@ type Callbacks interface {
 	OnIntelDrop(p *player.Player, team uint8)
 	OnWeaponFire(p *player.Player)
 	OnGrenadeToss(p *player.Player)
+	OnGrenadeExplode(thrower *player.Player, x, y, z float32)
 	OnRestock(p *player.Player)
 }
 
@@ -41,7 +42,9 @@ func (d *DefaultCallbacks) OnIntelCapture(p *player.Player, team uint8) bool    
 func (d *DefaultCallbacks) OnIntelDrop(p *player.Player, team uint8)            {}
 func (d *DefaultCallbacks) OnWeaponFire(p *player.Player)                       {}
 func (d *DefaultCallbacks) OnGrenadeToss(p *player.Player)                      {}
-func (d *DefaultCallbacks) OnRestock(p *player.Player)                          {}
+func (d *DefaultCallbacks) OnGrenadeExplode(thrower *player.Player, x, y, z float32) {
+}
+func (d *DefaultCallbacks) OnRestock(p *player.Player) {}
 
 type CallbackChain struct {
 	callbacks []Callbacks
@@ -153,6 +156,12 @@ func (c *CallbackChain) OnWeaponFire(p *player.Player) {
 func (c *CallbackChain) OnGrenadeToss(p *player.Player) {
 	for _, cb := range c.callbacks {
 		cb.OnGrenadeToss(p)
+	}
+}
+
+func (c *CallbackChain) OnGrenadeExplode(thrower *player.Player, x, y, z float32) {
+	for _, cb := range c.callbacks {
+		cb.OnGrenadeExplode(thrower, x, y, z)
 	}
 }
 
