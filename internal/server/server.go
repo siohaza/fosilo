@@ -1970,6 +1970,9 @@ func (s *Server) handleChatMessage(p *player.Player, data []byte) {
 
 	s.logger.Info("chat message", "player", p.GetName(), "message", message)
 
+	packet.PlayerID = p.ID
+	packet.Message = []byte(message)
+
 	if p.Muted {
 		s.sendChatToPlayer(p, "You are muted and cannot send messages.")
 		return
