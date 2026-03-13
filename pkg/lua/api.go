@@ -17,6 +17,7 @@ import (
 type ServerInterface interface {
 	KickPlayer(playerID uint8, reason string)
 	KillPlayer(victimID uint8, killerID uint8, killType protocol.KillType)
+	SendPlayerHP(playerID uint8, hp uint8)
 	SendChatToAll(message string)
 	SendChatToPlayer(p *player.Player, message string)
 	SendChatWithType(message string, chatType protocol.ChatType)
@@ -427,16 +428,8 @@ func (api *GameAPI) sendChat(state *lua.State) int {
 func (api *GameAPI) killPlayer(state *lua.State) int {
 	id, _ := state.ToInteger(1)
 
-	p, _ := api.gameState.Players.Get(uint8(id))
-	if p != nil {
-		p.Lock()
-		p.Alive = false
-		p.HP = 0
-		p.Unlock()
-
-		if api.server != nil {
-			api.server.KillPlayer(uint8(id), uint8(id), protocol.KillTypeTeamChange)
-		}
+	if api.server != nil {
+		api.server.KillPlayer(uint8(id), uint8(id), protocol.KillTypeTeamChange)
 	}
 
 	return 0
@@ -1253,9 +1246,7 @@ func (api *GameAPI) setPlayerHP(state *lua.State) int {
 		if hp > 255 {
 			hp = 255
 		}
-		p.Lock()
-		p.HP = uint8(hp)
-		p.Unlock()
+		api.server.SendPlayerHP(uint8(id), uint8(hp))
 	}
 
 	return 0

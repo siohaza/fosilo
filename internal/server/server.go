@@ -1109,6 +1109,10 @@ func (s *Server) handlePacket(peer enet.Peer, data []byte) {
 }
 
 func (s *Server) handlePositionData(p *player.Player, data []byte) {
+	if !p.IsAlive() {
+		return
+	}
+
 	var packet protocol.PacketPositionData
 	if err := binary.Read(bytes.NewReader(data), binary.LittleEndian, &packet); err != nil {
 		return
@@ -1127,6 +1131,10 @@ func (s *Server) handlePositionData(p *player.Player, data []byte) {
 }
 
 func (s *Server) handleOrientationData(p *player.Player, data []byte) {
+	if !p.IsAlive() {
+		return
+	}
+
 	var packet protocol.PacketOrientationData
 	if err := binary.Read(bytes.NewReader(data), binary.LittleEndian, &packet); err != nil {
 		return
@@ -1149,6 +1157,10 @@ func (s *Server) handleInputData(p *player.Player, data []byte) {
 		return
 	}
 
+	p.RLock()
+	prevCrouch := p.Crouching
+	p.RUnlock()
+
 	p.Lock()
 	p.KeyStates = packet.KeyStates
 	p.MoveForward = packet.KeyStates&protocol.KeyStateForward != 0
@@ -1160,6 +1172,10 @@ func (s *Server) handleInputData(p *player.Player, data []byte) {
 	p.Sneaking = packet.KeyStates&protocol.KeyStateSneak != 0
 	p.Sprinting = packet.KeyStates&protocol.KeyStateSprint != 0
 	p.Unlock()
+
+	if prevCrouch && !p.Crouching {
+		physics.TryUncrouch(p, s.gameState.Map)
+	}
 
 	s.broadcastPacketExcept(&packet, p.ID, false)
 }
@@ -1232,6 +1248,9 @@ func (s *Server) handleShot(p *player.Player) {
 
 func (s *Server) isValidTarget(shooter, target *player.Player) bool {
 	if shooter == nil || target == nil {
+		return false
+	}
+	if shooter.Team > 1 || target.GetTeam() > 1 {
 		return false
 	}
 	return target.ID != shooter.ID && target.IsAlive() && target.GetTeam() != shooter.Team
@@ -1394,18 +1413,18 @@ func (s *Server) processShot(shooter *player.Player, eyePos, direction protocol.
 }
 
 func (s *Server) validateHitTarget(attacker, target *player.Player) bool {
+	if attacker.Team > 1 || target.GetTeam() > 1 {
+		return false
+	}
 	if target.ID == attacker.ID {
 		return false
 	}
-
 	if !target.IsAlive() || !attacker.IsAlive() {
 		return false
 	}
-
 	if target.GetTeam() == attacker.GetTeam() {
 		return false
 	}
-
 	return true
 }
 
@@ -2499,8 +2518,27 @@ func (s *Server) KillPlayer(victimID uint8, killerID uint8, killType protocol.Ki
 	victim.RespawnTime = time.Now().Add(time.Duration(s.config.Server.RespawnTime) * time.Second)
 	victim.Unlock()
 
+	s.gameMode.OnPlayerKill(nil, victim, killType)
 	s.callbacks.OnPlayerKill(nil, victim, killType)
 	s.broadcastKillAction(victimID, killerID, killType)
+	s.checkWinConditionAndRotate()
+}
+
+func (s *Server) SendPlayerHP(playerID uint8, hp uint8) {
+	p, ok := s.gameState.Players.Get(playerID)
+	if !ok || !p.IsAlive() {
+		return
+	}
+	p.Lock()
+	p.HP = hp
+	p.Unlock()
+	hpPacket := protocol.PacketSetHP{
+		PacketID: uint8(protocol.PacketTypeSetHP),
+		HP:       hp,
+		Type:     protocol.HurtTypeWeapon,
+	}
+	s.sendPacket(p, &hpPacket, true)
+	s.sendPlayerProperties(p)
 }
 
 func (s *Server) handleEnvironmentKill(victim *player.Player, killType protocol.KillType) {

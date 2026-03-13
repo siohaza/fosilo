@@ -46,7 +46,7 @@ func MovePlayer(p *player.Player, vxlMap *vxl.Map, dt float32, gameTime float32)
 	left := keyStates&protocol.KeyStateLeft != 0
 	right := keyStates&protocol.KeyStateRight != 0
 
-	if jumping {
+	if jumping && (!airborne || wade) {
 		vel.Z = JumpVelocity
 		p.Lock()
 		p.Jumping = false
@@ -79,7 +79,6 @@ func MovePlayer(p *player.Player, vxlMap *vxl.Map, dt float32, gameTime float32)
 		accel *= DiagonalFactor
 	}
 
-	// Forward direction uses raw orientation (speed depends on look angle)
 	if forward {
 		vel.X += ori.X * accel
 		vel.Y += ori.Y * accel
