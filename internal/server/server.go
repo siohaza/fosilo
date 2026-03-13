@@ -1177,6 +1177,7 @@ func (s *Server) handleInputData(p *player.Player, data []byte) {
 		physics.TryUncrouch(p, s.gameState.Map)
 	}
 
+	packet.PlayerID = p.ID
 	s.broadcastPacketExcept(&packet, p.ID, false)
 }
 
@@ -1195,6 +1196,7 @@ func (s *Server) handleWeaponInput(p *player.Player, data []byte) {
 	p.SecondaryFire = packet.WeaponInput&protocol.WeaponInputSecondary != 0
 	p.Unlock()
 
+	packet.PlayerID = p.ID
 	s.broadcastPacketExcept(&packet, p.ID, false)
 
 	if p.PrimaryFire && p.CanShoot() {
@@ -1365,23 +1367,11 @@ func (s *Server) checkWinConditionAndRotate() {
 	}
 }
 
-func (s *Server) broadcastBlockDestruction(shooterID uint8, hitBlock protocol.Vector3i) {
-	blockPacket := protocol.PacketBlockAction{
-		PacketID: uint8(protocol.PacketTypeBlockAction),
-		PlayerID: shooterID,
-		Action:   protocol.BlockActionTypeSpadeGunDestroy,
-		X:        hitBlock.X,
-		Y:        hitBlock.Y,
-		Z:        hitBlock.Z,
-	}
-	s.broadcastPacket(&blockPacket, true)
-}
-
 func (s *Server) processShot(shooter *player.Player, eyePos, direction protocol.Vector3f) {
 	maxRange := float32(128.0)
 
 	closestPlayer, hitType, _ := s.findClosestPlayerHit(shooter, eyePos, direction, maxRange)
-	hit, hitPos, hitBlock, _ := physics.RaycastVXL(s.gameState.Map, eyePos, direction, maxRange)
+	hit, hitPos, _, _ := physics.RaycastVXL(s.gameState.Map, eyePos, direction, maxRange)
 
 	if closestPlayer != nil {
 		targetPos := closestPlayer.GetPosition()
@@ -1407,8 +1397,6 @@ func (s *Server) processShot(shooter *player.Player, eyePos, direction protocol.
 				s.handlePlayerKill(shooter, closestPlayer, killType)
 			}
 		}
-	} else if hit {
-		s.broadcastBlockDestruction(shooter.ID, hitBlock)
 	}
 }
 
@@ -1608,6 +1596,7 @@ func (s *Server) handleSetTool(p *player.Player, data []byte) {
 		s.sendPacket(p, &reloadPacket, true)
 	}
 
+	packet.PlayerID = p.ID
 	s.broadcastPacketExcept(&packet, p.ID, true)
 }
 
@@ -1617,10 +1606,15 @@ func (s *Server) handleSetColor(p *player.Player, data []byte) {
 		return
 	}
 
+	if !p.IsAlive() {
+		return
+	}
+
 	p.Lock()
 	p.Color = packet.Color
 	p.Unlock()
 
+	packet.PlayerID = p.ID
 	s.broadcastPacketExcept(&packet, p.ID, true)
 }
 
@@ -1755,6 +1749,7 @@ func (s *Server) handleBlockAction(p *player.Player, data []byte) {
 			color := uint32(colorRGB.R)<<16 | uint32(colorRGB.G)<<8 | uint32(colorRGB.B)
 			s.gameState.Map.Set(x, y, z, color)
 
+			packet.PlayerID = p.ID
 			s.broadcastPacket(&packet, true)
 		}
 	} else {
@@ -1801,6 +1796,7 @@ func (s *Server) handleBlockAction(p *player.Player, data []byte) {
 		}
 
 		s.gameState.Map.SetAir(x, y, z)
+		packet.PlayerID = p.ID
 		s.broadcastPacket(&packet, true)
 	}
 }
@@ -1868,6 +1864,7 @@ func (s *Server) handleBlockLine(p *player.Player, data []byte) {
 		}
 	}
 
+	packet.PlayerID = p.ID
 	s.broadcastPacket(&packet, true)
 }
 
@@ -1942,6 +1939,7 @@ func (s *Server) handleGrenade(p *player.Player, data []byte) {
 		}
 		s.gameState.AddGrenade(grenade)
 
+		packet.PlayerID = p.ID
 		s.broadcastPacketExcept(&packet, p.ID, true)
 	}
 }
@@ -2046,6 +2044,7 @@ func (s *Server) handleChangeWeapon(p *player.Player, data []byte) {
 
 	p.SetWeapon(packet.WeaponID)
 	s.broadcastShortPlayerData(p)
+	s.KillPlayer(p.ID, p.ID, protocol.KillTypeClassChange)
 }
 
 func (s *Server) handleHandshakeReturn(p *player.Player, data []byte) {
@@ -2592,6 +2591,8 @@ func (s *Server) changePlayerTeam(p *player.Player, team uint8) {
 		return
 	}
 
+	wasAlive := p.IsAlive()
+
 	var droppedIntel bool
 	var dropPos protocol.Vector3f
 
@@ -2604,8 +2605,8 @@ func (s *Server) changePlayerTeam(p *player.Player, team uint8) {
 	p.Team = team
 	if team == spectatorTeamID {
 		p.Alive = false
+		p.State = player.PlayerStateReady
 	}
-	p.State = player.PlayerStateReady
 	p.Unlock()
 
 	if droppedIntel {
@@ -2616,7 +2617,11 @@ func (s *Server) changePlayerTeam(p *player.Player, team uint8) {
 
 	if team <= 1 {
 		s.broadcastChangeTeam(p)
-		s.respawnPlayer(p.ID)
+		if wasAlive {
+			s.KillPlayer(p.ID, p.ID, protocol.KillTypeTeamChange)
+		} else {
+			s.respawnPlayer(p.ID)
+		}
 		return
 	}
 
@@ -2764,8 +2769,16 @@ func (s *Server) explodeGrenade(grenade *gamestate.Grenade) {
 		}
 	}
 
+	var throwerTeam uint8 = 255
+	if thrower, ok := s.gameState.Players.Get(grenade.PlayerID); ok {
+		throwerTeam = thrower.Team
+	}
+
 	s.gameState.Players.ForEach(func(p *player.Player) {
 		if !p.IsAlive() {
+			return
+		}
+		if p.ID != grenade.PlayerID && p.GetTeam() == throwerTeam && throwerTeam <= 1 {
 			return
 		}
 
