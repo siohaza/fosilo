@@ -25,6 +25,7 @@ import (
 	"github.com/siohaza/fosilo/internal/ping"
 	"github.com/siohaza/fosilo/internal/player"
 	"github.com/siohaza/fosilo/internal/protocol"
+	"github.com/siohaza/fosilo/internal/validation"
 	"github.com/siohaza/fosilo/internal/vote"
 	"github.com/siohaza/fosilo/pkg/classicgen"
 	"github.com/siohaza/fosilo/pkg/config"
@@ -60,25 +61,26 @@ func toNetworkTeamID(team uint8) uint8 {
 }
 
 type Server struct {
-	config          *config.Config
-	network         *network.Server
-	gameState       *gamestate.GameState
-	gameMode        gamemode.GameMode
-	logger          *slog.Logger
-	running         bool
-	tickRate        time.Duration
-	startTime       time.Time
-	luaCommands     *lua.CommandManager
-	voteManager     *vote.Manager
-	banManager      *bans.Manager
-	masterServers   []*masterserver.Client
-	pingHandler     *ping.Handler
-	currentMap      int
-	activeMapName   string
-	reportedMapName string
-	callbacks       *callbacks.CallbackChain
-	ctx             context.Context
-	cancel          context.CancelFunc
+	config               *config.Config
+	network              *network.Server
+	gameState            *gamestate.GameState
+	gameMode             gamemode.GameMode
+	logger               *slog.Logger
+	running              bool
+	tickRate             time.Duration
+	startTime            time.Time
+	luaCommands          *lua.CommandManager
+	voteManager          *vote.Manager
+	banManager           *bans.Manager
+	masterServers        []*masterserver.Client
+	pingHandler          *ping.Handler
+	currentMap           int
+	activeMapName        string
+	reportedMapName      string
+	callbacks            *callbacks.CallbackChain
+	ctx                  context.Context
+	cancel               context.CancelFunc
+	pendingMapRotationAt time.Time
 }
 
 func New(cfg *config.Config, logger *slog.Logger) (*Server, error) {
@@ -128,6 +130,9 @@ func New(cfg *config.Config, logger *slog.Logger) (*Server, error) {
 }
 
 func (s *Server) Start() error {
+	if len(s.config.Server.Maps) == 0 {
+		return fmt.Errorf("no maps configured")
+	}
 	if err := s.loadMap(s.config.Server.Maps[0]); err != nil {
 		return fmt.Errorf("failed to load map: %w", err)
 	}
@@ -826,6 +831,11 @@ func (s *Server) update() {
 		}
 	})
 
+	if !s.pendingMapRotationAt.IsZero() && time.Now().After(s.pendingMapRotationAt) {
+		s.pendingMapRotationAt = time.Time{}
+		s.rotateMap()
+	}
+
 	s.updateGrenades(dt)
 
 	if s.gameState.IsTimeLimitReached() {
@@ -919,8 +929,9 @@ func (s *Server) handleDisconnect(peer enet.Peer) {
 	if hasIntel {
 		pos := p.GetPosition()
 		groundPos := s.getGroundIntelDropPosition(pos)
-		s.gameState.DropIntel(1-team, groundPos)
-		s.broadcastIntelDrop(1-team, groundPos)
+		slot := s.getCarrierIntelSlot(team)
+		s.gameState.DropIntel(slot, groundPos)
+		s.broadcastIntelDrop(p.ID, slot, groundPos)
 	}
 
 	s.broadcastPlayerLeft(p.ID)
@@ -1103,13 +1114,14 @@ func (s *Server) handlePositionData(p *player.Player, data []byte) {
 		return
 	}
 
-	if !protocol.IsValidPosition(packet.X, packet.Y, packet.Z) {
+	if !validation.IsValidPlayerPosition(packet.X, packet.Y, packet.Z) {
 		return
 	}
 
 	p.Lock()
 	p.Position = protocol.Vector3f{X: packet.X, Y: packet.Y, Z: packet.Z}
 	p.EyePos = protocol.Vector3f{X: packet.X, Y: packet.Y, Z: packet.Z}
+	p.LastReportedPos = protocol.Vector3f{X: packet.X, Y: packet.Y, Z: packet.Z}
 	p.Velocity = protocol.Vector3f{X: 0, Y: 0, Z: 0}
 	p.Unlock()
 }
@@ -1120,7 +1132,7 @@ func (s *Server) handleOrientationData(p *player.Player, data []byte) {
 		return
 	}
 
-	if !protocol.IsValidOrientation(packet.X, packet.Y, packet.Z) {
+	if !validation.IsValidOrientation(packet.X, packet.Y, packet.Z) {
 		return
 	}
 
@@ -1130,6 +1142,10 @@ func (s *Server) handleOrientationData(p *player.Player, data []byte) {
 func (s *Server) handleInputData(p *player.Player, data []byte) {
 	var packet protocol.PacketInputData
 	if err := binary.Read(bytes.NewReader(data), binary.LittleEndian, &packet); err != nil {
+		return
+	}
+
+	if !p.IsAlive() {
 		return
 	}
 
@@ -1151,6 +1167,10 @@ func (s *Server) handleInputData(p *player.Player, data []byte) {
 func (s *Server) handleWeaponInput(p *player.Player, data []byte) {
 	var packet protocol.PacketWeaponInput
 	if err := binary.Read(bytes.NewReader(data), binary.LittleEndian, &packet); err != nil {
+		return
+	}
+
+	if !p.IsAlive() {
 		return
 	}
 
@@ -1321,8 +1341,7 @@ func (s *Server) checkWinConditionAndRotate() {
 		s.broadcastChat(fmt.Sprintf("%s team wins!", s.getTeamName(winningTeam)), protocol.ChatTypeSystem)
 
 		if s.gameMode.ShouldRotateMap() {
-			time.Sleep(5 * time.Second)
-			s.rotateMap()
+			s.pendingMapRotationAt = time.Now().Add(5 * time.Second)
 		}
 	}
 }
@@ -1375,11 +1394,15 @@ func (s *Server) processShot(shooter *player.Player, eyePos, direction protocol.
 }
 
 func (s *Server) validateHitTarget(attacker, target *player.Player) bool {
+	if target.ID == attacker.ID {
+		return false
+	}
+
 	if !target.IsAlive() || !attacker.IsAlive() {
 		return false
 	}
 
-	if target.GetTeam() == attacker.GetTeam() && target.ID != attacker.ID {
+	if target.GetTeam() == attacker.GetTeam() {
 		return false
 	}
 
@@ -1475,6 +1498,10 @@ func (s *Server) handleHit(p *player.Player, data []byte) {
 		return
 	}
 
+	if packet.HitType > protocol.HitTypeMelee {
+		return
+	}
+
 	target, ok := s.gameState.Players.Get(packet.PlayerID)
 	if !ok {
 		return
@@ -1500,7 +1527,11 @@ func (s *Server) handleHit(p *player.Player, data []byte) {
 	weapon := p.Weapon
 	p.RUnlock()
 
-	if packet.HitType != protocol.HitTypeMelee {
+	if packet.HitType == protocol.HitTypeMelee {
+		if !validation.IsMeleeInRange(distance) {
+			return
+		}
+	} else {
 		if !s.validateWeaponRange(p, target.GetName(), weapon, pos, targetPos, distance) {
 			return
 		}
@@ -1527,6 +1558,14 @@ func (s *Server) handleHit(p *player.Player, data []byte) {
 func (s *Server) handleSetTool(p *player.Player, data []byte) {
 	var packet protocol.PacketSetTool
 	if err := binary.Read(bytes.NewReader(data), binary.LittleEndian, &packet); err != nil {
+		return
+	}
+
+	if !p.IsAlive() {
+		return
+	}
+
+	if !validation.IsValidTool(packet.Tool) {
 		return
 	}
 
@@ -1588,6 +1627,10 @@ func (s *Server) handleExistingPlayer(p *player.Player, data []byte) {
 		return
 	}
 	weapon := protocol.WeaponType(data[3])
+	if !validation.IsValidWeapon(weapon) {
+		s.logger.Warn("received ExistingPlayer with invalid weapon", "player", p.ID, "weapon", data[3])
+		return
+	}
 	item := protocol.ItemType(data[4])
 	kills := binary.LittleEndian.Uint32(data[5:9])
 	color := protocol.Color3b{
@@ -1597,6 +1640,9 @@ func (s *Server) handleExistingPlayer(p *player.Player, data []byte) {
 	}
 
 	nameBytes := data[12:]
+	if len(nameBytes) > 15 {
+		nameBytes = nameBytes[:15]
+	}
 	name, err := protocol.CP437ToString(nameBytes)
 	if err != nil {
 		name = "Unknown"
@@ -1632,6 +1678,13 @@ func (s *Server) handleExistingPlayer(p *player.Player, data []byte) {
 }
 
 func (s *Server) handleBlockAction(p *player.Player, data []byte) {
+	if p.GetTeam() > 1 {
+		return
+	}
+	if !p.IsAlive() {
+		return
+	}
+
 	var packet protocol.PacketBlockAction
 	if err := binary.Read(bytes.NewReader(data), binary.LittleEndian, &packet); err != nil {
 		return
@@ -1640,6 +1693,12 @@ func (s *Server) handleBlockAction(p *player.Player, data []byte) {
 	x, y, z := int(packet.X), int(packet.Y), int(packet.Z)
 
 	if !s.gameState.Map.IsInside(x, y, z) {
+		return
+	}
+
+	if packet.Action != protocol.BlockActionTypeBuild &&
+		packet.Action != protocol.BlockActionTypeSpadeGunDestroy &&
+		packet.Action != protocol.BlockActionTypeSpadeSecondaryDestroy {
 		return
 	}
 
@@ -1733,6 +1792,10 @@ func (s *Server) handleBlockLine(p *player.Player, data []byte) {
 		return
 	}
 
+	if !p.IsAlive() {
+		return
+	}
+
 	x1, y1, z1 := int(packet.StartX), int(packet.StartY), int(packet.StartZ)
 	x2, y2, z2 := int(packet.EndX), int(packet.EndY), int(packet.EndZ)
 
@@ -1821,8 +1884,26 @@ func clampInt(value, low, high int) int {
 }
 
 func (s *Server) handleGrenade(p *player.Player, data []byte) {
+	if p.GetTeam() > 1 {
+		return
+	}
+	if !p.IsAlive() {
+		return
+	}
+
 	var packet protocol.PacketGrenade
 	if err := binary.Read(bytes.NewReader(data), binary.LittleEndian, &packet); err != nil {
+		return
+	}
+
+	if !protocol.IsValidPosition(packet.X, packet.Y, packet.Z) {
+		return
+	}
+	if !protocol.IsValidPosition(packet.VX, packet.VY, packet.VZ) {
+		return
+	}
+
+	if packet.FuseLength < 0 || packet.FuseLength > 3.0 {
 		return
 	}
 
@@ -1860,6 +1941,14 @@ func (s *Server) handleChatMessage(p *player.Player, data []byte) {
 		return
 	}
 
+	if len(message) > 256 {
+		return
+	}
+
+	if packet.Type != protocol.ChatTypeAll && packet.Type != protocol.ChatTypeTeam {
+		return
+	}
+
 	s.logger.Info("chat message", "player", p.GetName(), "message", message)
 
 	if p.Muted {
@@ -1894,8 +1983,11 @@ func (s *Server) handleWeaponReload(p *player.Player, data []byte) {
 		var packet protocol.PacketWeaponReload
 		packet.PacketID = uint8(protocol.PacketTypeWeaponReload)
 		packet.PlayerID = p.ID
+
+		p.RLock()
 		packet.MagazineAmmo = p.MagazineAmmo
 		packet.ReserveAmmo = p.ReserveAmmo
+		p.RUnlock()
 
 		s.broadcastPacketExcept(&packet, p.ID, true)
 	}
@@ -1922,8 +2014,15 @@ func (s *Server) handleChangeWeapon(p *player.Player, data []byte) {
 		return
 	}
 
+	if !p.IsAlive() {
+		return
+	}
+
+	if !validation.IsValidWeapon(packet.WeaponID) {
+		return
+	}
+
 	p.SetWeapon(packet.WeaponID)
-	s.respawnPlayer(p.ID)
 	s.broadcastShortPlayerData(p)
 }
 
@@ -2320,17 +2419,26 @@ func (s *Server) damagePlayer(playerID uint8, damage uint8, source protocol.Vect
 	s.sendPacket(p, &hpPacket, true)
 	s.sendPlayerProperties(p)
 
+	var hasIntel bool
+	var team uint8
+	var name string
+	p.RLock()
+	hasIntel = p.HasIntel
+	team = p.Team
+	name = p.Name
+	p.RUnlock()
+
 	if killed {
-		if p.HasIntel && p.Team <= 1 {
-			oppositeTeam := uint8(1 - p.Team)
+		if hasIntel && team <= 1 {
 			pos := p.GetPosition()
 			groundPos := s.getGroundIntelDropPosition(pos)
-			s.gameState.DropIntel(oppositeTeam, groundPos)
-			s.broadcastIntelDrop(oppositeTeam, groundPos)
+			slot := s.getCarrierIntelSlot(team)
+			s.gameState.DropIntel(slot, groundPos)
+			s.broadcastIntelDrop(p.ID, slot, groundPos)
 			p.Lock()
 			p.HasIntel = false
 			p.Unlock()
-			s.logger.Info("intel dropped on death", "player", p.Name, "team", p.Team)
+			s.logger.Info("intel dropped on death", "player", name, "team", team)
 		}
 
 		p.Lock()
@@ -2344,11 +2452,17 @@ func (s *Server) damagePlayer(playerID uint8, damage uint8, source protocol.Vect
 
 func (s *Server) broadcastKillAction(victimID, killerID uint8, killType protocol.KillType) {
 	packet := protocol.PacketKillAction{
-		PacketID:    uint8(protocol.PacketTypeKillAction),
-		PlayerID:    victimID,
-		KillerID:    killerID,
-		KillType:    killType,
-		RespawnTime: uint8(s.config.Server.RespawnTime) + 1,
+		PacketID: uint8(protocol.PacketTypeKillAction),
+		PlayerID: victimID,
+		KillerID: killerID,
+		KillType: killType,
+		RespawnTime: func() uint8 {
+			rt := s.config.Server.RespawnTime + 1
+			if rt > 255 {
+				return 255
+			}
+			return uint8(rt)
+		}(),
 	}
 	s.broadcastPacket(&packet, true)
 }
@@ -2359,9 +2473,28 @@ func (s *Server) KillPlayer(victimID uint8, killerID uint8, killType protocol.Ki
 		return
 	}
 
+	victim.RLock()
+	alreadyDead := !victim.Alive
+	hasIntel := victim.HasIntel
+	victimTeam := victim.Team
+	victim.RUnlock()
+
+	if alreadyDead {
+		return
+	}
+
+	if hasIntel && victimTeam <= 1 {
+		pos := victim.GetPosition()
+		groundPos := s.getGroundIntelDropPosition(pos)
+		slot := s.getCarrierIntelSlot(victimTeam)
+		s.gameState.DropIntel(slot, groundPos)
+		s.broadcastIntelDrop(victimID, slot, groundPos)
+	}
+
 	victim.Lock()
 	victim.Alive = false
 	victim.HP = 0
+	victim.HasIntel = false
 	victim.State = player.PlayerStateDead
 	victim.RespawnTime = time.Now().Add(time.Duration(s.config.Server.RespawnTime) * time.Second)
 	victim.Unlock()
@@ -2435,9 +2568,9 @@ func (s *Server) changePlayerTeam(p *player.Player, team uint8) {
 	p.Unlock()
 
 	if droppedIntel {
-		opposite := uint8(1 - currentTeam)
-		s.gameState.DropIntel(opposite, dropPos)
-		s.broadcastIntelDrop(opposite, dropPos)
+		slot := s.getCarrierIntelSlot(currentTeam)
+		s.gameState.DropIntel(slot, dropPos)
+		s.broadcastIntelDrop(p.ID, slot, dropPos)
 	}
 
 	if team <= 1 {
@@ -2451,13 +2584,21 @@ func (s *Server) changePlayerTeam(p *player.Player, team uint8) {
 	s.sendSpectatorConfirmation(p)
 }
 
-func (s *Server) broadcastIntelDrop(team uint8, position protocol.Vector3f) {
+func (s *Server) getCarrierIntelSlot(carrierTeam uint8) uint8 {
+	gm, _ := config.ParseGamemode(s.config.Server.Gamemode)
+	if gm == config.GamemodeBabel {
+		return 0
+	}
+	return 1 - carrierTeam
+}
+
+func (s *Server) broadcastIntelDrop(playerID uint8, team uint8, position protocol.Vector3f) {
 	if !s.intelEnabled() {
 		return
 	}
 	packet := protocol.PacketIntelDrop{
 		PacketID: uint8(protocol.PacketTypeIntelDrop),
-		PlayerID: team,
+		PlayerID: playerID,
 		Position: position,
 	}
 	s.broadcastPacket(&packet, true)
@@ -2505,7 +2646,9 @@ func (s *Server) sendWorldUpdate() {
 
 	s.gameState.Players.ForEach(func(p *player.Player) {
 		if p.GetState() == player.PlayerStateReady && p.GetTeam() <= 1 {
-			pos := p.GetPosition()
+			p.RLock()
+			pos := p.LastReportedPos
+			p.RUnlock()
 			ori := p.GetOrientation()
 
 			worldUpdate.Players[p.ID] = protocol.PlayerPositionData{
@@ -2743,12 +2886,14 @@ func (s *Server) broadcastShortPlayerData(p *player.Player) {
 	if p == nil {
 		return
 	}
+	p.RLock()
 	packet := protocol.PacketShortPlayerData{
 		PacketID: uint8(protocol.PacketTypeShortPlayerData),
 		PlayerID: p.ID,
 		Team:     p.Team,
 		Weapon:   p.Weapon,
 	}
+	p.RUnlock()
 	s.broadcastPacket(&packet, true)
 }
 
@@ -3162,11 +3307,13 @@ func (s *Server) handleCaptureSuccess(p *player.Player) {
 
 	if won {
 		s.gameState.ResetScores()
+		s.gameState.ResetIntel()
 		s.broadcastChat(fmt.Sprintf("%s team wins!", s.getTeamName(winningTeam)), protocol.ChatTypeSystem)
 
 		if s.gameMode.ShouldRotateMap() {
-			time.Sleep(5 * time.Second)
-			s.rotateMap()
+			s.pendingMapRotationAt = time.Now().Add(5 * time.Second)
+		} else {
+			s.syncIntelPositions()
 		}
 	}
 }
@@ -3192,8 +3339,7 @@ func (s *Server) handleTimeLimitReached() {
 	s.gameState.ResetIntel()
 
 	if s.gameMode.ShouldRotateMap() {
-		time.Sleep(5 * time.Second)
-		s.rotateMap()
+		s.pendingMapRotationAt = time.Now().Add(5 * time.Second)
 	}
 }
 
@@ -3207,8 +3353,16 @@ func (s *Server) getTeamName(team uint8) string {
 func (s *Server) changeMap(mapName string) error {
 	s.logger.Info("changing map", "spec", mapName)
 
+	s.gameState.ClearGrenades()
+
+	activePlayers := s.gameState.Players.GetAll()
+
 	if err := s.loadMap(mapName); err != nil {
 		return fmt.Errorf("failed to load map: %w", err)
+	}
+
+	for _, p := range activePlayers {
+		s.gameState.Players.Add(p)
 	}
 
 	displayName := s.GetCurrentMapName()
@@ -3241,6 +3395,10 @@ func (s *Server) changeMap(mapName string) error {
 }
 
 func (s *Server) rotateMap() {
+	if len(s.config.Server.Maps) == 0 {
+		s.logger.Error("cannot rotate map: no maps configured")
+		return
+	}
 	s.currentMap = (s.currentMap + 1) % len(s.config.Server.Maps)
 	mapName := s.config.Server.Maps[s.currentMap]
 

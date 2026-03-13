@@ -268,6 +268,14 @@ func (gs *GameState) findValidSpawnZ(x, y, groundZ int) int {
 	return groundZ - 2
 }
 
+func spawnRange(start, end int) int {
+	r := end - start + 1
+	if r < 1 {
+		r = 1
+	}
+	return r
+}
+
 func (gs *GameState) GetSpawnPosition(team uint8) protocol.Vector3f {
 	gs.mu.RLock()
 	defer gs.mu.RUnlock()
@@ -307,8 +315,8 @@ func (gs *GameState) GetSpawnPosition(team uint8) protocol.Vector3f {
 
 	maxAttempts := 10
 	for attempt := 0; attempt < maxAttempts; attempt++ {
-		x := float32(gs.rng.Intn(spawnArea.End[0]-spawnArea.Start[0]+1) + spawnArea.Start[0])
-		y := float32(gs.rng.Intn(spawnArea.End[1]-spawnArea.Start[1]+1) + spawnArea.Start[1])
+		x := float32(gs.rng.Intn(spawnRange(spawnArea.Start[0], spawnArea.End[0])) + spawnArea.Start[0])
+		y := float32(gs.rng.Intn(spawnRange(spawnArea.Start[1], spawnArea.End[1])) + spawnArea.Start[1])
 		groundZ := gs.Map.FindGroundLevel(int(x), int(y))
 		spawnZ := gs.findValidSpawnZ(int(x), int(y), groundZ)
 
@@ -317,8 +325,8 @@ func (gs *GameState) GetSpawnPosition(team uint8) protocol.Vector3f {
 		}
 	}
 
-	x := float32(gs.rng.Intn(spawnArea.End[0]-spawnArea.Start[0]+1) + spawnArea.Start[0])
-	y := float32(gs.rng.Intn(spawnArea.End[1]-spawnArea.Start[1]+1) + spawnArea.Start[1])
+	x := float32(gs.rng.Intn(spawnRange(spawnArea.Start[0], spawnArea.End[0])) + spawnArea.Start[0])
+	y := float32(gs.rng.Intn(spawnRange(spawnArea.Start[1], spawnArea.End[1])) + spawnArea.Start[1])
 	groundZ := gs.Map.FindGroundLevel(int(x), int(y))
 	spawnZ := gs.findValidSpawnZ(int(x), int(y), groundZ)
 
@@ -333,9 +341,14 @@ func (gs *GameState) PickupIntel(playerID uint8, team uint8) bool {
 		return false
 	}
 
-	oppositeTeam := 1 - team
+	var intelToCheck uint8
+	if gs.Gamemode == config.GamemodeBabel {
+		intelToCheck = 0
+	} else {
+		intelToCheck = 1 - team
+	}
 
-	if gs.Intel[oppositeTeam].Held {
+	if gs.Intel[intelToCheck].Held {
 		return false
 	}
 
@@ -353,8 +366,8 @@ func (gs *GameState) PickupIntel(playerID uint8, team uint8) bool {
 		return false
 	}
 
-	gs.Intel[oppositeTeam].Held = true
-	gs.Intel[oppositeTeam].CarrierID = playerID
+	gs.Intel[intelToCheck].Held = true
+	gs.Intel[intelToCheck].CarrierID = playerID
 
 	p.Lock()
 	p.HasIntel = true
@@ -369,6 +382,13 @@ func (gs *GameState) DropIntel(team uint8, position protocol.Vector3f) {
 
 	if team >= 2 {
 		return
+	}
+
+	var intelSlot uint8
+	if gs.Gamemode == config.GamemodeBabel {
+		intelSlot = 0
+	} else {
+		intelSlot = team
 	}
 
 	x := int(position.X)
@@ -388,9 +408,9 @@ func (gs *GameState) DropIntel(team uint8, position protocol.Vector3f) {
 		position.Z = float32(z)
 	}
 
-	gs.Intel[team].Held = false
-	gs.Intel[team].Position = position
-	gs.Intel[team].CarrierID = 0
+	gs.Intel[intelSlot].Held = false
+	gs.Intel[intelSlot].Position = position
+	gs.Intel[intelSlot].CarrierID = 0
 }
 
 func (gs *GameState) CaptureIntel(playerID uint8, team uint8) bool {
@@ -458,6 +478,12 @@ func (gs *GameState) IsIntelAtBase(team uint8) bool {
 	dz := intel.Position.Z - base.Z
 
 	return dx*dx+dy*dy+dz*dz < 2.0
+}
+
+func (gs *GameState) ClearGrenades() {
+	gs.mu.Lock()
+	defer gs.mu.Unlock()
+	gs.Grenades = gs.Grenades[:0]
 }
 
 func (gs *GameState) AddGrenade(g *Grenade) {
@@ -628,9 +654,12 @@ func (gs *GameState) ResetIntel() {
 	gs.Intel[0].Position = gs.IntelSpawnPos[0]
 	gs.Intel[0].CarrierID = 0
 
-	gs.Intel[1].Held = false
-	gs.Intel[1].Position = gs.IntelSpawnPos[1]
-	gs.Intel[1].CarrierID = 0
+	// in babel intel[1] remains perma hidden
+	if gs.Gamemode != config.GamemodeBabel {
+		gs.Intel[1].Held = false
+		gs.Intel[1].Position = gs.IntelSpawnPos[1]
+		gs.Intel[1].CarrierID = 0
+	}
 }
 
 func (gs *GameState) HasWon(team uint8) bool {

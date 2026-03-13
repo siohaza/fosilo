@@ -14,33 +14,34 @@ func GetClock() uint64 {
 }
 
 type Player struct {
-	ID            uint8
-	Peer          enet.Peer
-	Name          string
-	Team          uint8
-	Weapon        protocol.WeaponType
-	Tool          protocol.ItemType
-	Color         protocol.Color3b
-	Position      protocol.Vector3f
-	EyePos        protocol.Vector3f
-	Orientation   protocol.Vector3f
-	Velocity      protocol.Vector3f
-	HP            uint8
-	Blocks        uint8
-	Grenades      uint8
-	MagazineAmmo  uint8
-	ReserveAmmo   uint8
-	Kills         uint32
-	Deaths        uint32
-	Alive         bool
-	Crouching     bool
-	Airborne      bool
-	Wade          bool
-	Sprinting     bool
-	PrimaryFire   bool
-	SecondaryFire bool
-	KeyStates     protocol.KeyState
-	State         PlayerState
+	ID              uint8
+	Peer            enet.Peer
+	Name            string
+	Team            uint8
+	Weapon          protocol.WeaponType
+	Tool            protocol.ItemType
+	Color           protocol.Color3b
+	Position        protocol.Vector3f
+	EyePos          protocol.Vector3f
+	LastReportedPos protocol.Vector3f
+	Orientation     protocol.Vector3f
+	Velocity        protocol.Vector3f
+	HP              uint8
+	Blocks          uint8
+	Grenades        uint8
+	MagazineAmmo    uint8
+	ReserveAmmo     uint8
+	Kills           uint32
+	Deaths          uint32
+	Alive           bool
+	Crouching       bool
+	Airborne        bool
+	Wade            bool
+	Sprinting       bool
+	PrimaryFire     bool
+	SecondaryFire   bool
+	KeyStates       protocol.KeyState
+	State           PlayerState
 
 	MoveForward        bool
 	MoveBackwards      bool

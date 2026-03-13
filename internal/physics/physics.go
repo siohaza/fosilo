@@ -130,6 +130,9 @@ func MovePlayer(p *player.Player, vxlMap *vxl.Map, dt float32, gameTime float32)
 	if pos.Y >= float32(vxlMap.Height()) {
 		pos.Y = float32(vxlMap.Height() - 1)
 	}
+	if pos.Z < 0 {
+		pos.Z = 0
+	}
 	if pos.Z >= float32(vxlMap.Depth()-1) {
 		pos.Z = float32(vxlMap.Depth() - 2)
 	}

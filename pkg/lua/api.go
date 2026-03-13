@@ -718,7 +718,15 @@ func (api *GameAPI) getPlayerIP(state *lua.State) int {
 		return 1
 	}
 
-	ip := p.Peer.GetAddress().String()
+	p.RLock()
+	peer := p.Peer
+	p.RUnlock()
+	if peer == nil {
+		state.PushString("")
+		return 1
+	}
+
+	ip := peer.GetAddress().String()
 	state.PushString(ip)
 	return 1
 }
@@ -1239,12 +1247,16 @@ func (api *GameAPI) setPlayerHP(state *lua.State) int {
 		return 0
 	}
 
-	p.Lock()
-	p.HP = uint8(hp)
-	if p.HP <= 0 {
-		p.Alive = false
+	if hp <= 0 {
+		api.server.KillPlayer(uint8(id), 255, protocol.KillTypeWeapon)
+	} else {
+		if hp > 255 {
+			hp = 255
+		}
+		p.Lock()
+		p.HP = uint8(hp)
+		p.Unlock()
 	}
-	p.Unlock()
 
 	return 0
 }
@@ -1276,6 +1288,10 @@ func (api *GameAPI) setPlayerWeapon(state *lua.State) int {
 	id, _ := state.ToInteger(1)
 	weapon, _ := state.ToInteger(2)
 
+	if weapon < 0 || weapon > 2 {
+		return 0
+	}
+
 	p, _ := api.gameState.Players.Get(uint8(id))
 	if p != nil {
 		p.Lock()
@@ -1290,6 +1306,17 @@ func (api *GameAPI) setPlayerAmmo(state *lua.State) int {
 	id, _ := state.ToInteger(1)
 	primary, _ := state.ToInteger(2)
 	secondary, _ := state.ToInteger(3)
+
+	if primary < 0 {
+		primary = 0
+	} else if primary > 255 {
+		primary = 255
+	}
+	if secondary < 0 {
+		secondary = 0
+	} else if secondary > 255 {
+		secondary = 255
+	}
 
 	p, _ := api.gameState.Players.Get(uint8(id))
 	if p != nil {
@@ -1306,6 +1333,12 @@ func (api *GameAPI) setPlayerGrenades(state *lua.State) int {
 	id, _ := state.ToInteger(1)
 	grenades, _ := state.ToInteger(2)
 
+	if grenades < 0 {
+		grenades = 0
+	} else if grenades > 255 {
+		grenades = 255
+	}
+
 	p, _ := api.gameState.Players.Get(uint8(id))
 	if p != nil {
 		p.Lock()
@@ -1319,6 +1352,12 @@ func (api *GameAPI) setPlayerGrenades(state *lua.State) int {
 func (api *GameAPI) setPlayerBlocks(state *lua.State) int {
 	id, _ := state.ToInteger(1)
 	blocks, _ := state.ToInteger(2)
+
+	if blocks < 0 {
+		blocks = 0
+	} else if blocks > 255 {
+		blocks = 255
+	}
 
 	p, _ := api.gameState.Players.Get(uint8(id))
 	if p != nil {
@@ -1819,6 +1858,11 @@ func (api *GameAPI) sendProgressBar(state *lua.State) int {
 	entityID, _ := state.ToInteger(1)
 	capturingTeam, _ := state.ToInteger(2)
 	rateNum, _ := state.ToNumber(3)
+	if rateNum < -128 {
+		rateNum = -128
+	} else if rateNum > 127 {
+		rateNum = 127
+	}
 	rate := int8(rateNum)
 	progressNum, _ := state.ToNumber(4)
 	progress := float32(progressNum)

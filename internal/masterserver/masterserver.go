@@ -23,6 +23,7 @@ type Client struct {
 	enabled    bool
 	connected  bool
 	logger     *slog.Logger
+	stopCh     chan struct{}
 }
 
 func New(domain string, domainPort int, serverName string, gameMode string, mapName string, port int, maxPlayers int, logger *slog.Logger) (*Client, error) {
@@ -47,6 +48,7 @@ func New(domain string, domainPort int, serverName string, gameMode string, mapN
 		enabled:    false,
 		connected:  false,
 		logger:     logger,
+		stopCh:     make(chan struct{}),
 	}, nil
 }
 
@@ -153,13 +155,18 @@ func (c *Client) Start() {
 		defer ticker.Stop()
 
 		for {
-			<-ticker.C
-			c.Service()
+			select {
+			case <-c.stopCh:
+				return
+			case <-ticker.C:
+				c.Service()
+			}
 		}
 	}()
 }
 
 func (c *Client) Destroy() {
+	close(c.stopCh)
 	if c.peer != nil && c.connected {
 		c.peer.Disconnect(0)
 		time.Sleep(100 * time.Millisecond)
